@@ -75,6 +75,9 @@ done
 [[ "$db_ready" == 1 ]]
 docker exec -i -e MYSQL_PWD=synthetic-root-secret "$database" mysql -uroot < database/schema.sql
 docker exec -i -e MYSQL_PWD=synthetic-root-secret "$database" mysql -uroot < tests/fixtures/container-users.sql
+docker exec -i -e MYSQL_PWD=synthetic-root-secret "$database" mysql -uroot < training-src/database/setup.sql
+docker exec -i -e MYSQL_PWD=synthetic-root-secret "$database" mysql -uroot < tests/fixtures/training-reader.sql
+docker exec -i -e MYSQL_PWD=synthetic-root-secret "$database" mysql -uroot < training-src/database/grants.sql
 hash=$(docker run --rm --entrypoint php pc-forge:isolation-test -r 'echo password_hash("synthetic-instructor-password", PASSWORD_BCRYPT);')
 common=(--network "$network" --mount "type=bind,src=$work/ca.pem,dst=/etc/secrets/ca.pem,readonly" -e DB_HOST=fixture-db -e DB_PORT=3306 -e DB_NAME=pc_forge -e DB_SSL_CA=/run/pc-forge/ca.pem -e DB_USER=synthetic-production-user -e DB_PASSWORD=synthetic-production-secret -e TRAINING_DB_USER=synthetic-training-reader -e TRAINING_DB_PASSWORD=synthetic-training-secret -p 127.0.0.1::80)
 disabled=$(docker run -d "${common[@]}" pc-forge:isolation-test)
@@ -93,6 +96,16 @@ wait_ready() {
 wait_ready "$disabled"
 wait_ready "$enabled"
 python3 tests/container_http.py "http://$(endpoint "$disabled")/"
+# A real restricted MySQL account, but only in this disposable fixture service.
+training_env=(-e TRAINING_DB_HOST=fixture-db -e TRAINING_DB_PORT=3306 -e TRAINING_DB_NAME=pc_forge_training -e TRAINING_DB_USER=pc_forge_training_reader -e TRAINING_DB_PASSWORD=synthetic-training-readonly-secret -e TRAINING_DB_SSL_CA=/etc/secrets/ca.pem)
+docker exec "${training_env[@]}" "$disabled" /usr/local/bin/php /usr/local/lib/pc-forge/verify-training-db.php --verify
+# Correct credentials with the wrong trust store must fail, never silently skip TLS.
+echo 'Checking untrusted CA rejection: the next verifier failure is expected.'
+if docker exec "${training_env[@]}" -e TRAINING_DB_SSL_CA=/etc/ssl/certs/ca-certificates.crt "$disabled" /usr/local/bin/php /usr/local/lib/pc-forge/verify-training-db.php --verify; then
+    echo 'FAIL: training verifier accepted an untrusted fixture certificate' >&2; exit 1
+fi
+echo 'PASS: training verifier rejects an untrusted CA'
+docker exec "${training_env[@]}" "$disabled" /usr/local/bin/php /usr/local/lib/pc-forge/verify-training-db.php --verify
 docker exec "$disabled" /usr/sbin/runuser -u www-data -- /usr/local/bin/php -r 'require "/var/www/html/config/db.php";$status=db()->query("SHOW STATUS")->fetchAll(PDO::FETCH_KEY_PAIR);if(empty($status["Ssl_cipher"])){exit(1);}echo "PASS: production PDO connection negotiated TLS to the synthetic MySQL fixture\n";'
 [[ $(curl -s -o /dev/null -w '%{http_code}' "http://$(endpoint "$disabled")/training/") == 403 ]]
 [[ $(docker exec "$disabled" php -r 'echo is_dir("/run/pc-forge-training/sessions")?"unexpected":"absent";') == absent ]]

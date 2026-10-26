@@ -1,5 +1,45 @@
 # Implementation and executed checks
 
+## Shared-Aiven training DB preparation (2026-10-27)
+
+The user reports workflow #4 passed the prior PHP and Docker infrastructure gates.
+This change prepares pc_forge_training within the existing Aiven service, not a
+second server. Actual Aiven credentials, grants, TLS and protected-schema denial
+have NOT been verified by the assistant; no Aiven connection was attempted.
+
+Prepared an Aiven API creation payload with mysql_grants=[], an optional SQL
+creation path with a server-generated random password, exact table-level SELECT
+grants/SSL requirement, and a detailed manual operator guide. Setup/reset table
+names remain fully qualified. Added independent TRAINING_DB_* validation and a
+CLI-only verifier requiring --verify. It uses verified TLS/native prepares/no
+multi-statements, checks the authenticated identity and a strict grant allowlist,
+exercises synthetic reads, and requires error 1044 for both protected schemas.
+No write/DDL/grant operations run in verification. Errors omit raw driver text,
+grants, credentials, certificate contents and traces. No auto-enable marker exists.
+
+Local PASS: all PHP lint/BOM checks; new grant/config/invalid-CA policy checks;
+explicit CLI opt-in/missing configuration checks in an isolated environment;
+existing throttling/source-policy tests; full local synthetic TLS regression suite
+including schema namespace protection; shell syntax and Git whitespace review.
+Actual Aiven verification and the new MySQL Docker reader/TLS checks are NOT RUN
+locally. The CI additions create a real SELECT-only user solely on the disposable
+fixture service, never Aiven. They verify the same CLI and reject a wrong CA.
+
+Files modified: .github/workflows/isolation.yml, Dockerfile,
+tests/container-isolation.sh, training-src/database/setup.sql,
+training-src/README.md, and this results file.
+Files added: .gitignore, docker/training-db-config.php,
+docker/training-db-policy.php, docker/verify-training-db.php,
+tests/training_db_checks.php, tests/fixtures/training-reader.sql,
+training-src/database/aiven-user-request.json,
+training-src/database/create-user.sql, training-src/database/grants.sql,
+training-src/database/AIVEN_SETUP.md.
+
+The only Docker changes copy inert CLI tools outside the web root. No startup,
+proxy, supervisor environment, production DB_* config, CA handling, public
+authentication, or training enablement changes were made. No push/deployment,
+live SQL, passwords in Git, or vulnerable authentication code was added.
+
 ## Run #2 shutdown repair
 
 Inspected the actual Docker job 121683667353 in run 40354629518. All preceding

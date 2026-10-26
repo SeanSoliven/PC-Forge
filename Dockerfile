@@ -28,6 +28,9 @@ COPY docker/prepare-training.php /usr/local/lib/pc-forge/prepare-training.php
 COPY docker/training-config.php /usr/local/lib/pc-forge/training-config.php
 COPY docker/training-router.php /usr/local/lib/pc-forge/training-router.php
 COPY docker/verify-training.php /usr/local/lib/pc-forge/verify-training.php
+COPY docker/training-db-config.php /usr/local/lib/pc-forge/training-db-config.php
+COPY docker/training-db-policy.php /usr/local/lib/pc-forge/training-db-policy.php
+COPY docker/verify-training-db.php /usr/local/lib/pc-forge/verify-training-db.php
 COPY docker/supervise-pc-forge /usr/local/bin/supervise-pc-forge
 RUN chown -R root:pc-training /opt/pc-forge-training \
     && find /opt/pc-forge-training -type d -exec chmod 750 {} + \

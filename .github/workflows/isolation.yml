@@ -47,6 +47,7 @@ jobs:
       - name: Throttling and safe preview tests
         run: |
           php tests/training_checks.php
+          php tests/training_db_checks.php
           python3 tests/training_http.py --php php
       - name: Authentication, authorization, cart, checkout and SQL safety regressions
         run: python3 tests/integration.py --php php --mysqld /usr/sbin/mariadbd --openssl openssl

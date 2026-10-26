@@ -1,0 +1,11 @@
+# Runtime credentials and certificates must never enter Git.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+**/aiven-user-response*.json
+**/*.private.json
+__pycache__/

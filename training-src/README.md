@@ -121,16 +121,19 @@ injection; the code does not exist in this implementation.
 
 ## Separate synthetic database — manual preparation only
 
-Provision a separate training MySQL instance/isolated database account, never
-pc_forge or mens_daydb. `database/setup.sql` creates pc_forge_training and synthetic
-users/products only. It fails if the database already exists; do not drop existing
-data to bypass failures. Its plaintext demo_password column is teaching data only.
-The synthetic passwords are lab-customer-123 and lab-admin-123. The runtime reader
-must have SELECT on only users/products, no roles, global/schema-wide privileges,
-FILE, PROCESS, EXECUTE, DDL/DML or admin privileges. Require TLS and an independent
-CA/configuration. SHOW GRANTS and real denied-access tests must be performed before
-a backend can use it. The safe preview has no DB configuration and ignores any
-TRAINING_DB_* variables; do not add production credentials to them.
+Use the existing Aiven service with the separate `pc_forge_training` database and
+an independent, table-restricted `pc_forge_training_reader` account. Do not reuse
+production credentials or grant access to pc_forge/mens_daydb. Follow
+[database/AIVEN_SETUP.md](database/AIVEN_SETUP.md) for the zero-privilege Aiven API
+payload, SQL-only alternative, table grants, TRAINING_DB_* settings, and explicit
+read-only verification. Aiven's default new-service-user privileges are too broad;
+do not use an unqualified default-user creation flow.
+
+Keep TRAINING_PREVIEW_ENABLED=0 until actual verification succeeds. CLI helpers
+are provided outside the web root; they connect only when an operator runs
+`php /usr/local/lib/pc-forge/verify-training-db.php --verify`. They are not called
+by startup, do not enable the backend, and do not write grants/data. The isolated
+preview still ignores TRAINING_DB_* and has no DB connection or vulnerable login.
 
 `database/reset.sql` resets only the known synthetic rows and stock when run by
 the separate training owner. Every write in setup/reset is schema-qualified, even if a client ignores errors.
