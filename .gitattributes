@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+*.sh text eol=lf
+docker/start-pc-forge text eol=lf
+docker/supervise-pc-forge text eol=lf

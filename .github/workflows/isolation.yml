@@ -40,6 +40,8 @@ jobs:
           bash -n docker/start-pc-forge
           bash -n docker/supervise-pc-forge
           bash -n tests/container-isolation.sh
+          bash -n tests/shell-diagnostics.sh
+          python3 tests/test_isolation_shell.py
           git diff --check
       - name: Throttling and safe preview tests
         run: |
@@ -68,6 +70,8 @@ jobs:
           curl --version
           openssl version
           python3 --version
+      - name: Check shell failure diagnostics and executable paths
+        run: python3 tests/test_isolation_shell.py
       - name: Build and exercise isolated application containers
         run: bash tests/container-isolation.sh
       - name: Summarize gate result

@@ -1,5 +1,26 @@
 # Implementation and executed checks
 
+## CI run #1 repair
+
+Inspected actual job logs for run 40350955406, Docker job 121670582025. Its exit
+127 is confirmed at the original isolation-script line 89: env -i excludes
+/usr/sbin from PATH, while the test called bare runuser. The production supervisor
+had already succeeded using /usr/sbin/runuser. Test commands now use that absolute
+path, with an early in-image executable/identity-switch preflight. No package
+installation or relaxation of isolation is needed.
+
+Added precise command/file/line/status ERR diagnostics and LF Git attributes,
+plus tests that preserve exit 127/1 and do not expand a synthetic secret into
+logs. Corrected an unreadable /proc environment being treated as empty: actual
+backend requests now enforce the environment allowlist and reject pollution.
+
+Local results: four shell-diagnostic/path/line-ending tests PASS; safe-preview HTTP
+tests including unexpected environment rejection PASS; changed PHP lint, Bash
+syntax and whitespace review PASS. Full corrected Docker run NOT EXECUTED locally
+(Docker unavailable). The original GitHub run passed the PHP job, Docker build,
+synthetic production flows/TLS, instructor gate, and UID assertions, but the full
+isolation gate did not finish. Real independent training DB grants remain unverified.
+
 ## GitHub Actions automation
 
 Added `.github/workflows/isolation.yml` with read-only, PR/manual Linux jobs for

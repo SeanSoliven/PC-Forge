@@ -3,6 +3,13 @@
 set -Eeuo pipefail
 curl() { command curl --connect-timeout 2 --max-time 10 "$@"; }
 cd "$(dirname "$0")/.."
+source tests/shell-diagnostics.sh
+for executable in docker python3 curl openssl bash mktemp chmod head rm rmdir; do
+    if ! type -P "$executable" >/dev/null; then
+        isolation_error 127 "$LINENO" "type -P $executable (missing runner executable)" "${BASH_SOURCE[0]}"
+        exit 127
+    fi
+done
 work=$(mktemp -d)
 disabled=''
 enabled=''
@@ -30,10 +37,18 @@ cleanup() {
     exit "$status"
 }
 trap cleanup EXIT
-trap 'echo "FAIL: Docker isolation assertion at line $LINENO" >&2' ERR
 openssl req -x509 -newkey rsa:2048 -nodes -keyout "$work/key.pem" -out "$work/ca.pem" -days 1 -subj /CN=fixture-db -addext subjectAltName=DNS:fixture-db >/dev/null 2>&1
 chmod 600 "$work/ca.pem"
 docker build -t pc-forge:isolation-test .
+# Check the actual image and the same restricted-PATH identity switch used below.
+docker run --rm --entrypoint /bin/sh pc-forge:isolation-test -eu -c '
+    test -x /usr/sbin/runuser
+    test -x /usr/local/bin/php
+    for executable in bash env su install sed apache2ctl apache2-foreground; do
+        command -v "$executable"
+    done
+    env -i PATH=/usr/local/bin:/usr/bin:/bin /usr/sbin/runuser -u pc-training -- env -i PATH=/usr/local/bin:/usr/bin:/bin /usr/local/bin/php -n -r '\''if (getenv("DB_PASSWORD")!==false) { exit(1); } echo "PASS: restricted-PATH runuser/PHP preflight\n";'\''
+'
 docker network create "$network" >/dev/null
 docker volume create "$cert_volume" >/dev/null
 docker volume create "$data_volume" >/dev/null
@@ -72,7 +87,7 @@ wait_ready() {
 wait_ready "$disabled"
 wait_ready "$enabled"
 python3 tests/container_http.py "http://$(endpoint "$disabled")/"
-docker exec "$disabled" runuser -u www-data -- php -r 'require "/var/www/html/config/db.php";$status=db()->query("SHOW STATUS")->fetchAll(PDO::FETCH_KEY_PAIR);if(empty($status["Ssl_cipher"])){exit(1);}echo "PASS: production PDO connection negotiated TLS to the synthetic MySQL fixture\n";'
+docker exec "$disabled" /usr/sbin/runuser -u www-data -- /usr/local/bin/php -r 'require "/var/www/html/config/db.php";$status=db()->query("SHOW STATUS")->fetchAll(PDO::FETCH_KEY_PAIR);if(empty($status["Ssl_cipher"])){exit(1);}echo "PASS: production PDO connection negotiated TLS to the synthetic MySQL fixture\n";'
 [[ $(curl -s -o /dev/null -w '%{http_code}' "http://$(endpoint "$disabled")/training/") == 403 ]]
 [[ $(docker exec "$disabled" php -r 'echo is_dir("/run/pc-forge-training/sessions")?"unexpected":"absent";') == absent ]]
 [[ $(curl -s -o /dev/null -w '%{http_code}' "http://$(endpoint "$disabled")/login.php") == 200 ]]
@@ -86,16 +101,16 @@ done
 [[ $(curl -s -H 'X-Forwarded-Proto: https' -H 'Cookie: PHPSESSID=synthetic-production-session' -u instructor:synthetic-instructor-password -o /dev/null -w '%{http_code}' "http://$(endpoint "$enabled")/training/") == 200 ]]
 [[ $(curl -s -H 'X-Forwarded-Proto: https' -u instructor:synthetic-instructor-password -d 'email=fixture&password=fixture' -o /dev/null -w '%{http_code}' "http://$(endpoint "$enabled")/training/login.php") == 503 ]]
 docker exec -i "$enabled" php < tests/container-probes.php
-docker exec "$enabled" env -i PATH=/usr/local/bin:/usr/bin:/bin runuser -u pc-training -- env -i PATH=/usr/local/bin:/usr/bin:/bin php -n /usr/local/lib/pc-forge/verify-training.php
+docker exec "$enabled" env -i PATH=/usr/local/bin:/usr/bin:/bin /usr/sbin/runuser -u pc-training -- env -i PATH=/usr/local/bin:/usr/bin:/bin /usr/local/bin/php -n /usr/local/lib/pc-forge/verify-training.php
 # Attempt actual reads as the training UID, without open_basedir masking permissions.
-docker exec "$enabled" env -i PATH=/usr/local/bin:/usr/bin:/bin runuser -u pc-training -- env -i PATH=/usr/local/bin:/usr/bin:/bin php -n -r 'foreach(["/run/pc-forge/ca.pem","/etc/secrets/ca.pem","/var/www/html/config/db.php","/run/pc-forge-production-sessions/sess_productionfixture123456"] as $p){if(@file_get_contents($p)!==false){exit(1);}}echo "PASS: actual production files and session contents denied to training UID\n";'
+docker exec "$enabled" env -i PATH=/usr/local/bin:/usr/bin:/bin /usr/sbin/runuser -u pc-training -- env -i PATH=/usr/local/bin:/usr/bin:/bin /usr/local/bin/php -n -r 'foreach(["/run/pc-forge/ca.pem","/etc/secrets/ca.pem","/var/www/html/config/db.php","/run/pc-forge-production-sessions/sess_productionfixture123456"] as $p){if(@file_get_contents($p)!==false){exit(1);}}echo "PASS: actual production files and session contents denied to training UID\n";'
 # Both the training cookie name and an attempted production-cookie name must fail.
 for name in PCFORGE_TRAINING PHPSESSID; do
     [[ $(curl -s -H "Cookie: $name=synthetictrainingadminfixture123456" -o /dev/null -w '%{http_code}' "http://$(endpoint "$enabled")/admin/index.php") == 302 ]]
 done
 echo 'PASS: forged training admin session cannot authenticate production'
 docker exec "$enabled" apache2ctl -t
-docker exec "$enabled" runuser -u www-data -- php -r '$p=getenv("DB_SSL_CA");if(!is_readable($p)||@openssl_x509_read(file_get_contents($p))===false){exit(1);}echo "PASS: Apache user still reads and parses runtime CA\n";'
+docker exec "$enabled" /usr/sbin/runuser -u www-data -- /usr/local/bin/php -r '$p=getenv("DB_SSL_CA");if(!is_readable($p)||@openssl_x509_read(file_get_contents($p))===false){exit(1);}echo "PASS: Apache user still reads and parses runtime CA\n";'
 # Supervisor must not leave a running public frontend after its backend exits.
 docker exec "$enabled" php -r 'foreach(glob("/proc/[0-9]*/cmdline") as $p){$c=@file_get_contents($p);if($c!==false&&str_contains($c,"-S\0"."127.0.0.1:9081")){posix_kill((int)basename(dirname($p)),15);break;}}'
 for unused in {1..30}; do

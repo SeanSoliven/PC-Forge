@@ -58,3 +58,16 @@ with tempfile.TemporaryDirectory(prefix='pc-forge-preview-test-') as directory:
         check(request('/assets/style.css',good)[0]==200,'existing production CSS served in preview')
     finally:
         process.terminate();process.wait(timeout=10);log.close()
+    # Even a correctly signed proxy request must not accept an inherited secret.
+    polluted=dict(env,DB_PASSWORD='synthetic-unexpected-environment')
+    with open(work/'polluted.log','w') as log:
+        process=subprocess.Popen([args.php,'-n','-S',f'127.0.0.1:{port}','-t',str(work/'public'),str(router)],env=polluted,stdout=log,stderr=log)
+        try:
+            for unused in range(50):
+                try:
+                    status,_,_=request('/',good)
+                    break
+                except OSError: time.sleep(.1)
+            check(status==403,'actual backend fails closed if production environment is inherited')
+        finally:
+            process.terminate();process.wait(timeout=10)

@@ -20,11 +20,10 @@ foreach (glob('/proc/[0-9]*/status') ?: [] as $path) {
     if ($uid===$production['uid'] && str_contains($status,"Name:\tapache2")) { $apacheWorker=true; }
     if ($uid===$training['uid'] && str_contains($command,'127.0.0.1:9081')) {
         $trainingWorker=true;
-        $entries=explode("\0",(string)file_get_contents(dirname($path).'/environ'));
-        foreach ($entries as $entry) {
-            if ($entry==='') { continue; }
-            check_probe(str_starts_with($entry,'PATH='),'running backend environment contains only explicit PATH');
-        }
+        // Linux ptrace restrictions can deny even root this environ read. Never
+        // turn an unreadable file into an empty environment and report a pass.
+        // The actual backend validates its environment in training-router.php;
+        // the authenticated HTTP 200 assertion exercises that fail-closed guard.
     }
 }
 check_probe($apacheWorker && $trainingWorker,'live Apache and preview workers have the expected distinct UIDs');

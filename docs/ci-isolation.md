@@ -1,5 +1,37 @@
 # GitHub Actions: Linux isolation tests without Docker on your laptop
 
+## Run #1: exit 127 diagnosis and fix
+
+The [actual Docker job log](https://github.com/SeanSoliven/PC-Forge/actions/runs/40350955406/job/121670582025)
+shows `env: 'runuser': No such file or directory` at the original
+tests/container-isolation.sh line 89. The command used
+`env -i PATH=/usr/local/bin:/usr/bin:/bin runuser ...`, but Debian installs the
+existing executable at `/usr/sbin/runuser`. The supervisor already used that
+absolute path successfully. MySQL, the image build, synthetic logins, verified
+TLS, instructor proxy checks, and distinct worker UIDs had already passed. This
+was a test PATH bug, not a missing MySQL client or a startup interpreter error.
+
+All test runuser calls now use `/usr/sbin/runuser`, and PHP calls following that
+identity switch use `/usr/local/bin/php`. An image preflight checks the required
+executables and exercises the same restricted-PATH launch before database setup.
+The restrictive PATH and every identity/secret/session assertion are retained.
+The shell files had no CRLF or BOM; .gitattributes now preserves their LF endings.
+
+The log also exposed a denied root read of `/proc/.../environ` that the probe
+incorrectly cast into an empty string. The probe no longer reports an unreadable
+environment as a pass. The actual preview router now rejects unexpected process
+environment names before returning content, so the existing authenticated HTTP
+200 check tests that guard. A local polluted-environment HTTP test verifies denial.
+
+Failure logging now reports file, line, original exit status and shell-quoted
+source command, plus a GitHub error annotation. It does not enable shell xtrace
+or expand runtime credential variables into diagnostics. Regression tests force
+missing-command exit 127 and failed-assertion exit 1, checking both status
+preservation and that a synthetic secret value is not expanded in the log.
+
+These fixes are locally validated, not yet rerun in GitHub Actions. Do not count
+the original partially successful Docker run as a completed isolation gate.
+
 Workflow: `.github/workflows/isolation.yml`, named **PC Forge isolation and
 regressions**. It runs on GitHub-hosted `ubuntu-24.04` runners when a pull request
 is opened/updated or when manually dispatched. No local Docker Desktop or WSL is
@@ -92,5 +124,6 @@ verification. A green CI run does not deploy or authorize enabling vulnerable co
 - Actual GitHub-hosted run, Docker image build, MySQL-container TLS startup,
   Linux datadir initialization, and Linux UID/file probes: NOT RUN locally.
 
-No remote workflow has been dispatched or claimed successful. GitHub's first run
-will exercise the Linux-only paths and may expose platform-specific failures.
+Run #1 passed the PHP job and failed the Docker job as described above. No remote
+run was dispatched by the assistant. The corrected full Linux gate still requires
+a new run after the fix is published; no push or deployment was performed here.

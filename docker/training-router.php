@@ -1,7 +1,9 @@
 <?php
 declare(strict_types=1);
 $token=@file_get_contents('/run/pc-forge-training/proxy-token');
+$allowedEnvironment=PHP_OS_FAMILY==='Windows' ? ['PATH','SystemRoot'] : ['PATH'];
 if (PHP_SAPI!=='cli-server' || !is_string($token) || strlen($token)!==64
+    || array_diff(array_keys(getenv()),$allowedEnvironment)!==[]
     || !in_array($_SERVER['REMOTE_ADDR']??'', ['127.0.0.1','::1'], true)
     || !hash_equals($token,$_SERVER['HTTP_X_PC_FORGE_TRAINING']??'')
     || isset($_SERVER['HTTP_COOKIE']) || isset($_SERVER['HTTP_AUTHORIZATION'])) {
