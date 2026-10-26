@@ -1,5 +1,46 @@
 # GitHub Actions: Linux isolation tests without Docker on your laptop
 
+## Run #2: inherited stop signal and exit 137
+
+The [run #2 Docker job](https://github.com/SeanSoliven/PC-Forge/actions/runs/40354629518/job/121683667353)
+passed the isolation checks and backend-exit shutdown test, then failed the
+disabled-training stop assertion at the original script line 132. Its last
+shutdown interval was approximately the configured ten-second Docker stop timeout.
+The disabled container logs show no Apache SIGTERM shutdown before force-kill.
+
+The PHP Apache base image specifies
+[`STOPSIGNAL SIGWINCH`](https://raw.githubusercontent.com/docker-library/php/master/8.3/bookworm/apache/Dockerfile).
+That is appropriate when Apache is PID 1, but this application replaces PID 1
+with a Bash supervisor that handled TERM/INT only. Docker stop therefore did not
+invoke the supervisor's TERM handler and eventually forced exit 137. The test
+targets the saved disabled-container ID, separately from the enabled container;
+there is no evidence of an ID mix-up. The old job did not record OOMKilled and
+removed its containers during cleanup, so that flag cannot be recovered or
+asserted false from the old logs.
+
+The Dockerfile now explicitly overrides the inherited signal with
+`STOPSIGNAL SIGTERM`. The supervisor has explicit signal callbacks and a single
+EXIT cleanup that forwards TERM, reaps each child, logs statuses, and preserves
+the intended service exit code. Startup/CA handling is unchanged. The test keeps
+the same ten-second timeout and now checks the built image's stop-signal metadata,
+distinct/expected running container identity, OOMKilled=false, and exit code zero
+in addition to retaining the exit-137 rejection.
+
+Before and after stop, diagnostics print the selected container ID/name, training
+flag, configured signal, running/exit/OOM status, start/finish timestamps, error
+and recent logs. Stop elapsed time and the Docker CLI return status are recorded
+before assertions. Failure cleanup prints the same state before removing fixtures.
+No environment dumps, certificate contents or runtime passwords are printed.
+
+`tests/test_supervisor.py` exercises the real supervisor using harmless Apache
+stubs: TERM forwarding/child reaping/zero exit, preservation of a failed child's
+exit status, and the Dockerfile signal override. All three pass locally under Git
+Bash, as do the four existing shell diagnostic tests and syntax/whitespace checks.
+These tests do not emulate Linux PID 1 or actual Apache. Docker is unavailable
+locally; the corrected Docker/Render shutdown behavior is not yet verified and
+requires a new Actions run. No timeout increase, assertion removal, push or deploy
+was performed.
+
 ## Run #1: exit 127 diagnosis and fix
 
 The [actual Docker job log](https://github.com/SeanSoliven/PC-Forge/actions/runs/40350955406/job/121670582025)

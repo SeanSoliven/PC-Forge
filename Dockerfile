@@ -41,4 +41,7 @@ RUN sed -i 's/\r$//' /usr/local/bin/start-pc-forge \
 
 EXPOSE 80
 
+# PID 1 is our supervisor, not Apache. Override the base image's SIGWINCH.
+STOPSIGNAL SIGTERM
+
 CMD ["start-pc-forge"]

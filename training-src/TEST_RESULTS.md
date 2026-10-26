@@ -1,5 +1,28 @@
 # Implementation and executed checks
 
+## Run #2 shutdown repair
+
+Inspected the actual Docker job 121683667353 in run 40354629518. All preceding
+assertions passed, including actual secret/session denial and backend-exit
+shutdown. The disabled container reached exit 137 after the ten-second stop
+window, without a logged Apache TERM shutdown. The image inherited the PHP Apache
+base's SIGWINCH stop signal while its PID 1 supervisor trapped TERM/INT only.
+
+Fixed Dockerfile STOPSIGNAL to SIGTERM and made supervisor signal handling,
+forwarding, child reaping and exit logging explicit. The unchanged startup script
+still validates/copies the Aiven CA and execs the supervisor. Kept the ten-second
+limit and exit-137 assertion; added OOMKilled=false and exit-zero assertions,
+image-signal/container-identity checks, pre/post inspect/log output, and measured
+stop duration. Original OOMKilled was not logged and is unavailable after cleanup.
+
+Local PASS: three real-supervisor/stub-process tests, four shell diagnostic/path
+tests, Bash syntax, Python syntax, and whitespace review. Linux Docker PID 1,
+actual Apache shutdown and corrected OOM/stop timing remain NOT TESTED locally.
+The new supervisor test is included in both GitHub Actions jobs. New file:
+tests/test_supervisor.py; modified Dockerfile, docker/supervise-pc-forge,
+tests/container-isolation.sh, .github/workflows/isolation.yml, docs/ci-isolation.md,
+and this results file. No vulnerable code, live DB action, push or deployment.
+
 ## CI run #1 repair
 
 Inspected actual job logs for run 40350955406, Docker job 121670582025. Its exit

@@ -18,12 +18,17 @@ database=''
 network="pc-forge-ci-$$-$RANDOM"
 cert_volume="$network-certs"
 data_volume="$network-data"
+container_diagnostics() {
+    local container=$1
+    docker inspect -f 'id={{.Id}} name={{.Name}} training={{range .Config.Env}}{{if eq . "TRAINING_PREVIEW_ENABLED=1"}}enabled{{end}}{{end}} stop_signal={{.Config.StopSignal}} running={{.State.Running}} exit={{.State.ExitCode}} oom_killed={{.State.OOMKilled}} started={{.State.StartedAt}} finished={{.State.FinishedAt}} error={{json .State.Error}}' "$container" >&2 || true
+    docker logs --tail 100 "$container" >&2 || true
+}
 cleanup() {
     status=$?
     trap - EXIT
     if [[ "$status" != 0 ]]; then
         for container in "$disabled" "$enabled" "$unexpected" "$database"; do
-            [[ -z "$container" ]] || docker logs --tail 100 "$container" 2>&1 || true
+            [[ -z "$container" ]] || container_diagnostics "$container"
         done
     fi
     [[ -z "$disabled" ]] || docker rm -f "$disabled" >/dev/null 2>&1 || true
@@ -40,6 +45,7 @@ trap cleanup EXIT
 openssl req -x509 -newkey rsa:2048 -nodes -keyout "$work/key.pem" -out "$work/ca.pem" -days 1 -subj /CN=fixture-db -addext subjectAltName=DNS:fixture-db >/dev/null 2>&1
 chmod 600 "$work/ca.pem"
 docker build -t pc-forge:isolation-test .
+[[ $(docker image inspect -f '{{.Config.StopSignal}}' pc-forge:isolation-test) == SIGTERM ]]
 # Check the actual image and the same restricted-PATH identity switch used below.
 docker run --rm --entrypoint /bin/sh pc-forge:isolation-test -eu -c '
     test -x /usr/sbin/runuser
@@ -127,9 +133,21 @@ for unused in {1..30}; do
 done
 [[ $(docker inspect -f '{{.State.Running}}' "$unexpected") != true ]]
 [[ $(docker inspect -f '{{.State.ExitCode}}' "$unexpected") != 0 ]]
-docker stop --time 10 "$disabled" >/dev/null
+# Keep the original ten-second limit: fix signal delivery rather than extend it.
+[[ "$disabled" != "$enabled" && "$disabled" != "$unexpected" ]]
+[[ $(docker inspect -f '{{.State.Running}}' "$disabled") == true ]]
+[[ $(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$disabled") != *'TRAINING_PREVIEW_ENABLED=1'* ]]
+container_diagnostics "$disabled"
+stop_started=$SECONDS
+stop_result=0
+docker stop --time 10 "$disabled" >/dev/null || stop_result=$?
+printf 'Disabled-training stop: elapsed_seconds=%s docker_stop_status=%s timeout_seconds=10\n' "$((SECONDS-stop_started))" "$stop_result" >&2
+container_diagnostics "$disabled"
+[[ "$stop_result" == 0 ]]
 [[ $(docker inspect -f '{{.State.Running}}' "$disabled") != true ]]
+[[ $(docker inspect -f '{{.State.OOMKilled}}' "$disabled") == false ]]
 [[ $(docker inspect -f '{{.State.ExitCode}}' "$disabled") != 137 ]]
+[[ $(docker inspect -f '{{.State.ExitCode}}' "$disabled") == 0 ]]
 echo 'PASS: normal container shutdown completes without timeout/SIGKILL'
 echo 'PASS: startup/default disable, instructor gate, cookie separation, UID/env/file/session probes'
 echo 'NOT VERIFIED: real independent training DB credentials, TLS and restricted grants. Preview has no DB connection. Vulnerable authentication must remain absent.'

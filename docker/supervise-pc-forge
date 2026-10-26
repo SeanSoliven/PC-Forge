@@ -3,12 +3,33 @@ set -Eeuo pipefail
 apache_pid=''
 training_pid=''
 cleanup() {
-    trap - EXIT TERM INT
-    [[ -z "$apache_pid" ]] || kill -TERM "$apache_pid" 2>/dev/null || true
-    [[ -z "$training_pid" ]] || kill -TERM "$training_pid" 2>/dev/null || true
-    wait || true
+    local result=$?
+    trap - EXIT
+    # Ignore repeated stop requests while forwarding and reaping once.
+    trap '' TERM INT
+    for child in "$apache_pid" "$training_pid"; do
+        if [[ -n "$child" ]]; then
+            printf 'PC Forge supervisor: forwarding SIGTERM to child pid=%s\n' "$child" >&2
+            kill -TERM "$child" 2>/dev/null || true
+        fi
+    done
+    for child in "$apache_pid" "$training_pid"; do
+        if [[ -n "$child" ]]; then
+            local child_result=0
+            wait "$child" || child_result=$?
+            printf 'PC Forge supervisor: reaped child pid=%s status=%s\n' "$child" "$child_result" >&2
+        fi
+    done
+    printf 'PC Forge supervisor: shutdown complete status=%s\n' "$result" >&2
+    exit "$result"
 }
-trap cleanup EXIT TERM INT
+stop_requested() {
+    printf 'PC Forge supervisor: received %s; stopping children\n' "$1" >&2
+    exit "$2"
+}
+trap cleanup EXIT
+trap 'stop_requested SIGTERM 0' TERM
+trap 'stop_requested SIGINT 130' INT
 if [[ "${TRAINING_PREVIEW_ENABLED:-0}" == 1 ]]; then
     env -i PATH=/usr/local/bin:/usr/bin:/bin /usr/sbin/runuser -u pc-training -- \
         env -i PATH=/usr/local/bin:/usr/bin:/bin /usr/local/bin/php -n /usr/local/lib/pc-forge/verify-training.php
@@ -30,9 +51,11 @@ unset TRAINING_INSTRUCTOR_BCRYPT TRAINING_INSTRUCTOR_USER
 apache2ctl -t
 apache2-foreground &
 apache_pid=$!
+printf 'PC Forge supervisor: started apache pid=%s training_pid=%s\n' "$apache_pid" "${training_pid:-disabled}" >&2
 # Stop the whole service if either component exits, including on failure.
 set +e
 if [[ -n "$training_pid" ]]; then wait -n "$apache_pid" "$training_pid"; else wait "$apache_pid"; fi
 result=$?
 set -e
+printf 'PC Forge supervisor: child exited status=%s; stopping service\n' "$result" >&2
 exit "$result"
