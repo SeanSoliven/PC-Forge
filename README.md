@@ -11,6 +11,23 @@ Copy folder to `C:\xampp\htdocs\pc-forge`. PHP needs pdo_mysql enabled. Supply e
 ## 3. Deploy
 Use a PHP-capable host (e.g. a PHP Apache Docker container on Render); Aiven hosts only the database, **not** your PHP website. Set the same environment variables on your PHP host, and mount the Aiven CA file as a secret. Require HTTPS on the deployed storefront. On Aiven, allow the application host's network access according to your service's network configuration.
 
+### Render Docker configuration
+
+Keep the Render Secret File named `ca.pem` (mounted at `/etc/secrets/ca.pem`).
+Set `DB_SSL_CA=/run/pc-forge/ca.pem` and `DB_NAME=pc_forge` in the Render service environment.
+Keep `DB_HOST`, `DB_PORT`, `DB_USER`, and `DB_PASSWORD` set to the Aiven connection values.
+Use the Dockerfile's default startup command; remove any Render Docker Command override
+that bypasses `start-pc-forge`. Save the environment changes and redeploy the service.
+
+At each container startup, root copies the mounted CA into `/run/pc-forge/ca.pem`
+with ownership `root:www-data` and mode `640`; the directory has mode `755`.
+Startup validates readability and certificate parsing as `www-data` before starting Apache.
+Missing, empty, unreadable, or invalid certificates stop startup. PHP also validates the CA
+before connecting and keeps SSL server certificate verification enabled.
+The CA stays outside Apache's document root. Production PHP hides errors from visitors
+and logs errors to container stderr, visible in private Render service logs.
+This deployment process does not import a schema or change any database records.
+
 ## 4. Admin account
 Register a normal account first. Then in DBeaver, run `UPDATE users SET role='admin' WHERE email='YOUR_REGISTERED_EMAIL';` (replace with your own email). Log out and log in again. Never expose an admin registration option publicly.
 

@@ -17,9 +17,8 @@ function db(): PDO {
 
     // Check required database configuration
     if (!$host || !$user || $pass === false) {
-        throw new RuntimeException(
-            'Database configuration missing'
-        );
+        error_log('PC Forge database configuration missing required environment variables.');
+        throw new RuntimeException('Database connection unavailable');
     }
 
     // PDO configuration
@@ -34,19 +33,11 @@ function db(): PDO {
 
     if ($ca) {
 
-        error_log(
-            'SSL CA exists: ' .
-            (is_file($ca) ? 'YES' : 'NO')
-        );
-
-        error_log(
-            'SSL CA readable: ' .
-            (is_readable($ca) ? 'YES' : 'NO')
-        );
-
-        // Safely read the certificate
-        $contents = is_readable($ca)
-            ? file_get_contents($ca)
+        // Never fall back to an unencrypted connection when validation fails.
+        $exists = is_file($ca);
+        $readable = $exists && is_readable($ca);
+        $contents = $readable
+            ? @file_get_contents($ca)
             : false;
 
         // Validate PEM certificate format
@@ -54,15 +45,13 @@ function db(): PDO {
             ? @openssl_x509_read($contents)
             : false;
 
-        error_log(
-            'SSL CA valid PEM: ' .
-            ($cert !== false ? 'YES' : 'NO')
-        );
-
         if ($cert === false) {
-            throw new RuntimeException(
-                'Aiven SSL certificate is invalid or unreadable'
-            );
+            error_log(sprintf(
+                'PC Forge SSL CA validation failed: exists=%s readable=%s parseable_PEM=NO',
+                $exists ? 'YES' : 'NO',
+                $readable ? 'YES' : 'NO'
+            ));
+            throw new RuntimeException('Database connection unavailable');
         }
 
         // Configure PDO MySQL SSL
@@ -70,9 +59,8 @@ function db(): PDO {
         $opts[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = true;
 
     } else {
-        throw new RuntimeException(
-            'DB_SSL_CA is not configured'
-        );
+        error_log('PC Forge database configuration missing DB_SSL_CA.');
+        throw new RuntimeException('Database connection unavailable');
     }
 
     // Connect to Aiven MySQL
@@ -84,17 +72,18 @@ function db(): PDO {
             $opts
         );
 
-        error_log('Aiven MySQL connection successful');
-
         return $pdo;
 
     } catch (PDOException $e) {
 
-        // Log technical details privately
-        error_log(
-            'Aiven MySQL connection failed: ' .
-            $e->getMessage()
-        );
+        // Driver messages may contain usernames or connection details. Log codes only.
+        $sqlState = $e->errorInfo[0] ?? 'unknown';
+        $driverCode = $e->errorInfo[1] ?? 'unknown';
+        error_log(sprintf(
+            'PC Forge MySQL connection failed: SQLSTATE=%s driver_code=%s',
+            $sqlState,
+            $driverCode
+        ));
 
         // Avoid exposing credentials or internal paths
         throw new RuntimeException(

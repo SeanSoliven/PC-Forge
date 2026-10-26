@@ -16,9 +16,10 @@ RUN chown -R www-data:www-data /var/www/html \
     > /etc/apache2/conf-available/pc-forge.conf \
     && a2enconf pc-forge
 
-# Check certificate availability at runtime
-RUN printf '#!/bin/sh\nif [ -r /etc/secrets/ca.pem ]; then\n  echo "Aiven CA certificate is readable"\nelse\n  echo "WARNING: Aiven CA certificate is missing or unreadable"\nfi\nexec apache2-foreground\n' > /usr/local/bin/start-pc-forge \
-    && chmod +x /usr/local/bin/start-pc-forge
+COPY docker/start-pc-forge /usr/local/bin/start-pc-forge
+COPY docker/production.ini /usr/local/etc/php/conf.d/zz-production.ini
+RUN sed -i 's/\r$//' /usr/local/bin/start-pc-forge \
+    && chmod 755 /usr/local/bin/start-pc-forge
 
 EXPOSE 80
 

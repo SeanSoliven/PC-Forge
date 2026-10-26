@@ -1,0 +1,22 @@
+#!/bin/sh
+set -eu
+
+fail() {
+    echo "PC Forge startup error: $1" >&2
+    exit 1
+}
+
+[ -f /etc/secrets/ca.pem ] && [ -r /etc/secrets/ca.pem ] \
+    || fail 'Required Render Secret File /etc/secrets/ca.pem is missing or unreadable.'
+[ -s /etc/secrets/ca.pem ] || fail 'Render Secret File ca.pem is empty.'
+[ "${DB_SSL_CA:-}" = /run/pc-forge/ca.pem ] \
+    || fail 'Set DB_SSL_CA=/run/pc-forge/ca.pem in Render environment settings.'
+
+install -d -o root -g www-data -m 755 /run/pc-forge
+install -o root -g www-data -m 640 /etc/secrets/ca.pem /run/pc-forge/ca.pem
+
+# Check access and PEM parsing as the same user that handles Apache requests.
+su -s /bin/sh www-data -c 'php -r '\''$p = getenv("DB_SSL_CA"); if (!is_file($p) || !is_readable($p) || ($pem = @file_get_contents($p)) === false || @openssl_x509_read($pem) === false) { fwrite(STDERR, "PC Forge startup error: CA certificate is unreadable or invalid for www-data.\n"); exit(1); }'\'''
+
+echo 'PC Forge: Aiven CA certificate prepared and validated for www-data.'
+exec apache2-foreground
