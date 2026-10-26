@@ -1,6 +1,13 @@
 .git
 .github
+.codex
+.agents
 .env
 .env.*
 *.log
 README.md
+AUDIT.md
+tests
+*.pem
+*.key
+__pycache__

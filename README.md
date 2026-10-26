@@ -32,4 +32,11 @@ This deployment process does not import a schema or change any database records.
 Register a normal account first. Then in DBeaver, run `UPDATE users SET role='admin' WHERE email='YOUR_REGISTERED_EMAIL';` (replace with your own email). Log out and log in again. Never expose an admin registration option publicly.
 
 ## Notes
-This is a starter demo, not a production-ready store. Checkout supports COD and a **manual bank transfer placeholder**, with no gateway, shipping carrier, email confirmations, or payment verification integration. Session-based cart is used; `cart_items` is reserved for future persistent carts. Product images are illustrative remote URLs. Test and harden before accepting real orders: HTTPS, trusted image hosting, rate limits, server-side validation, persistent cart, secure session cookies, CSRF, stock-restoration on cancellations, auditing, and shipping/payment workflows. The checkout transaction locks product rows and decrements inventory atomically.
+This is a starter demo, not a production-ready store. Checkout supports COD and a **manual bank transfer placeholder**, with no gateway, shipping carrier, email confirmations, or payment verification integration. Session-based cart is used; `cart_items` is reserved for future persistent carts. Product images are illustrative remote URLs. Test and harden before accepting real orders: HTTPS, trusted image hosting, rate limits, server-side validation, persistent cart, secure session cookies, CSRF, auditing, and shipping/payment workflows. The checkout transaction locks product rows and decrements inventory atomically.
+
+
+## Audit and verification
+See `AUDIT.md` for the repair findings, exact local checks, deployment verification, and limitations.
+`database/inspect.sql` inspects only `pc_forge` schema metadata without changing records.
+Do not import `database/schema.sql` into an existing production database as a repair.
+The isolated HTTP regression suite is `tests/integration.py` (Python 3.12+, PHP with pdo_mysql/openssl, MariaDB, OpenSSL).

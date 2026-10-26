@@ -10,13 +10,15 @@ function db(): PDO {
 
     // Aiven MySQL environment variables
     $host = getenv('DB_HOST');
-    $port = getenv('DB_PORT') ?: '3306';
+    $port = getenv('DB_PORT');
+    $port = ($port === false || $port === '') ? '3306' : $port;
     $name = getenv('DB_NAME') ?: 'pc_forge';
     $user = getenv('DB_USER');
     $pass = getenv('DB_PASSWORD');
 
     // Check required database configuration
-    if (!$host || !$user || $pass === false) {
+    if (!$host || !$user || $pass === false || !ctype_digit($port) || (int)$port < 1 || (int)$port > 65535
+        || !preg_match('/^[a-zA-Z0-9_.:-]+$/D', $host) || !preg_match('/^[a-zA-Z0-9_]+$/D', $name)) {
         error_log('PC Forge database configuration missing required environment variables.');
         throw new RuntimeException('Database connection unavailable');
     }
@@ -115,13 +117,13 @@ function csrf(): string {
 // Validate CSRF token
 function check_csrf(): void {
     if (
-        !hash_equals(
+        !is_string($_POST['csrf'] ?? null) || empty($_SESSION['csrf']) || !hash_equals(
             $_SESSION['csrf'] ?? '',
             $_POST['csrf'] ?? ''
         )
     ) {
-        throw new RuntimeException(
-            'Invalid request token'
+        throw new InvalidArgumentException(
+            'Your form expired. Reload the page and try again.'
         );
     }
 }

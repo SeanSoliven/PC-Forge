@@ -11,7 +11,7 @@ WORKDIR /var/www/html
 
 COPY . /var/www/html/
 
-RUN chown -R www-data:www-data /var/www/html \
+RUN chown -R root:root /var/www/html \
     && printf 'DirectoryIndex index.php index.html\n<Directory /var/www/html>\n    AllowOverride All\n    Require all granted\n</Directory>\n' \
     > /etc/apache2/conf-available/pc-forge.conf \
     && a2enconf pc-forge

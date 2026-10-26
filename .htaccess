@@ -1,0 +1,8 @@
+Options -Indexes
+RewriteEngine On
+RewriteRule (^|/)\. - [F]
+
+# Source/configuration assets must never be served by Apache.
+<FilesMatch "(?i)^(?:\..*|.*\.(?:sql|ini|pem|key|log|md)|Dockerfile|bootstrap\.php|layout\.php)$">
+    Require all denied
+</FilesMatch>
