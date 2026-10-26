@@ -43,7 +43,7 @@ def check(condition, name):
 
 
 def php(code, env):
-    result = subprocess.run([args.php], input='<?php\n' + code, text=True,
+    result = subprocess.run([args.php, '-d', 'output_buffering=0'], input='<?php\n' + code, text=True,
                             capture_output=True, env=env, cwd=ROOT)
     if result.returncode:
         raise RuntimeError('Fixture PHP failed: ' + result.stderr)
@@ -96,6 +96,9 @@ try:
         env = os.environ.copy()
         env.update(DB_HOST='localhost', DB_PORT=str(dbport), DB_NAME='pc_forge_test',
                    DB_USER='root', DB_PASSWORD='', DB_SSL_CA=str(cert), RENDER='false')
+        check(php("require 'config/db.php';if(headers_sent()){exit(1);}echo 'quiet';", env) == 'quiet', 'db include emits no output with buffering disabled')
+        probe = "session_save_path(" + repr(str(sessions).replace('\\', '/')) + ");require 'bootstrap.php';echo session_status()===PHP_SESSION_ACTIVE && !headers_sent()?'active':'failed';"
+        check(php(probe, env) == 'active', 'session starts before output with PHP buffering disabled')
         log = open(work / 'server.log', 'w', encoding='utf-8')
         flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         server = subprocess.Popen([args.mysqld, '--no-defaults', '--datadir=' + str(data),
@@ -119,7 +122,7 @@ $sql=str_replace(['CREATE DATABASE IF NOT EXISTS pc_forge ', 'USE pc_forge;'], [
 $p->exec($sql);
 echo 'fixture ready';'''
         check(php(setup, env) == 'fixture ready', 'repository schema imported into disposable TLS database')
-        phpserver = subprocess.Popen([args.php, '-d', 'session.save_path=' + str(sessions), '-d', 'display_errors=0', '-d',
+        phpserver = subprocess.Popen([args.php, '-d', 'output_buffering=0', '-d', 'session.save_path=' + str(sessions), '-d', 'display_errors=0', '-d',
                                       'log_errors=1', '-S', '127.0.0.1:' + str(webport),
                                       '-t', str(ROOT)], env=env, stdout=log, stderr=log,
                                      creationflags=flags)
@@ -238,6 +241,9 @@ echo 'fixture ready';'''
         php(query + "$p->exec('RENAME TABLE categories TO categories_unavailable');", env)
         status, body, _ = customer.request('index.php')
         check(status == 500 and 'Something went wrong' in body and 'SQLSTATE' not in body and str(ROOT) not in body, 'unexpected SQL failure returns safe nonblank HTTP 500')
+        log.flush()
+        server_log = (work / 'server.log').read_text(encoding='utf-8')
+        check('headers already sent' not in server_log and 'Session cannot be started' not in server_log and 'Session ini settings cannot be changed' not in server_log, 'no header or session initialization warnings in HTTP regression logs')
         print('PASS: integration suite complete', flush=True)
         # Stop services before TemporaryDirectory removes only its own verified temp path.
         for process in reversed(processes):

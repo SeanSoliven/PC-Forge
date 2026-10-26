@@ -1,5 +1,39 @@
 # PC Forge audit and repair
 
+## Headers/session repair follow-up
+
+Production logs for deployed commit `b70cd1507797813c0feae26e0d2b702a9b86e970`
+identify output starting at `config/db.php:1`. Byte inspection confirmed a leading
+newline (`0A 3C 3F 70 68 70`), not a BOM, before the PHP opening tag. Removing that
+single byte fixes the confirmed source of premature output without changing DB
+logic. The earlier blank-page investigation below describes the earlier audit;
+the new production evidence identifies this specific headers/session failure.
+
+All 12 PHP files were scanned for leading output and UTF-8 BOMs. None remain;
+PHP-only files have no closing tags. Bootstrap now configures and starts the
+session before requiring DB helpers and before starting its existing page-render
+buffer. Buffering is retained only for safe rendering of later errors, not to
+hide startup output. Cookie security, CSRF, PDO prepares, TLS verification,
+certificate paths, and production logging are unchanged.
+
+Regression checks are `python tests/php_source.py` and the existing isolated
+`tests/integration.py` suite, now with PHP output buffering disabled, a quiet DB
+include check, a session startup check, and a check that HTTP logs contain no
+headers/session initialization warnings. The suite uses temporary accounts and
+database fixtures only; it does not reset/recreate production admin ID 1.
+
+Follow-up results: PASS for all 12 PHP byte scans and syntax checks, session startup
+with automatic buffering disabled, Render HTTPS Secure/HttpOnly/SameSite flags,
+the complete isolated HTTP regression suite (including homepage, registration,
+login, admin access, redirects, session persistence, logout, checkout, and safe
+errors), no header/session warnings in regression logs, startup shell syntax,
+local Apache configuration syntax, and Git whitespace checks.
+
+Available runtime: PHP 8.2.12; PHP 8.3 and Docker are unavailable locally. Local
+Apache default configuration validates; container execution and live Render/Aiven
+connectivity are not claimed. No Render deployment or settings change is triggered
+by this repair; pushing the fix may invoke the service's existing automatic deploy.
+
 Audit date: 2026-10-26 (Asia/Manila). Changes are local; nothing was pushed,
 deployed, or changed in Aiven. No existing accounts or passwords were changed.
 

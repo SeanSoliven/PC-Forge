@@ -1,9 +1,7 @@
 <?php
-require_once __DIR__ . '/config/db.php';
 ini_set('display_errors', '0');
 ini_set('log_errors', '1');
 ini_set('zend.exception_ignore_args', '1');
-ob_start();
 set_exception_handler(function (Throwable $error): void {
     log_failure('uncaught request failure', $error);
     while (ob_get_level() > 0) { ob_end_clean(); }
@@ -29,6 +27,10 @@ if (!session_start()) { throw new RuntimeException('Session initialization faile
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: strict-origin-when-cross-origin');
 header('Cache-Control: no-store');
+
+require_once __DIR__ . '/config/db.php';
+// Buffer page rendering for safe error pages only after sessions and headers work.
+ob_start();
 
 function log_failure(string $context, Throwable $error): void {
     // Messages and exception arguments can contain SQL, credentials, or user input.
