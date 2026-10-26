@@ -1,12 +1,21 @@
 <?php
 require __DIR__.'/bootstrap.php';
 require __DIR__.'/layout.php';
+require __DIR__.'/config/login_limit.php';
 $error='';
 if ($_SERVER['REQUEST_METHOD']==='POST') {
     try {
         check_csrf();
         $email=strtolower(trim(input($_POST,'email')));
         $password=input($_POST,'password');
+        if (strlen($email)>190 || strlen($password)>1024) { throw new InvalidArgumentException('Invalid email or password.'); }
+        $retry=login_budget($email);
+        if ($retry) {
+            error_log('PC Forge login rate limit rejected a request.');
+            http_response_code(429);
+            header('Retry-After: '.$retry);
+            $error='Too many sign-in attempts. Please try again in a few minutes.';
+        } else {
         $s=db()->prepare('SELECT id,name,email,password_hash,role FROM users WHERE email=?');
         $s->execute([$email]);
         $u=$s->fetch();
@@ -17,6 +26,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         unset($u['password_hash'], $_SESSION['csrf']);
         $_SESSION['user']=$u;
         redirect($u['role']==='admin' ? 'admin/index.php' : 'index.php');
+        }
     } catch (Throwable $e) { $error=request_error($e,'login failed'); }
 }
 

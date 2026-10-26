@@ -11,3 +11,6 @@ tests
 *.pem
 *.key
 __pycache__
+security-lab
+training-src/database
+training-src/README.md

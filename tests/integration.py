@@ -11,8 +11,10 @@ import http.cookiejar
 import os
 from pathlib import Path
 import re
+import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -94,14 +96,26 @@ try:
         check(result.returncode == 0, 'generate disposable TLS certificate')
         dbport, webport = port(), port()
         env = os.environ.copy()
-        env.update(DB_HOST='localhost', DB_PORT=str(dbport), DB_NAME='pc_forge_test',
-                   DB_USER='root', DB_PASSWORD='', DB_SSL_CA=str(cert), RENDER='false')
+        env.update(DB_HOST='127.0.0.1', DB_PORT=str(dbport), DB_NAME='pc_forge_test',
+                   DB_USER='root', DB_PASSWORD='', DB_SSL_CA=str(cert), RENDER='false',
+                   PCFORGE_RATE_DIR=str(work / 'login-budgets'))
         check(php("require 'config/db.php';if(headers_sent()){exit(1);}echo 'quiet';", env) == 'quiet', 'db include emits no output with buffering disabled')
         probe = "session_save_path(" + repr(str(sessions).replace('\\', '/')) + ");require 'bootstrap.php';echo session_status()===PHP_SESSION_ACTIVE && !headers_sent()?'active':'failed';"
         check(php(probe, env) == 'active', 'session starts before output with PHP buffering disabled')
         log = open(work / 'server.log', 'w', encoding='utf-8')
         flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        if os.name != 'nt':
+            installer = shutil.which('mariadb-install-db') or shutil.which('mysql_install_db')
+            if not installer:
+                raise RuntimeError('Install mariadb-server: an isolated datadir initializer is required on Linux.')
+            initialized = subprocess.run([installer, '--no-defaults', '--datadir=' + str(data),
+                                          '--auth-root-authentication-method=normal', '--skip-test-db'],
+                                         stdout=log, stderr=log)
+            if initialized.returncode:
+                log.flush()
+                raise RuntimeError('Temporary MariaDB datadir initialization failed: ' + (work / 'server.log').read_text(errors='replace'))
         server = subprocess.Popen([args.mysqld, '--no-defaults', '--datadir=' + str(data),
+                                   *([] if os.name == 'nt' else ['--socket=' + str(work / 'mysql.sock'), '--pid-file=' + str(work / 'mysql.pid')]),
                                    '--port=' + str(dbport), '--bind-address=127.0.0.1',
                                    '--skip-grant-tables', '--skip-log-bin',
                                    '--innodb-buffer-pool-size=32M', '--ssl-ca=' + str(cert),
@@ -116,7 +130,7 @@ try:
                     break
             except OSError:
                 time.sleep(.1)
-        setup = '''$p=new PDO('mysql:host=localhost;port='.getenv('DB_PORT'), 'root', '', [PDO::MYSQL_ATTR_SSL_CA=>getenv('DB_SSL_CA'), PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT=>true]);
+        setup = '''$p=new PDO('mysql:host=127.0.0.1;port='.getenv('DB_PORT'), 'root', '', [PDO::MYSQL_ATTR_SSL_CA=>getenv('DB_SSL_CA'), PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT=>true]);
 $sql=file_get_contents('database/schema.sql');
 $sql=str_replace(['CREATE DATABASE IF NOT EXISTS pc_forge ', 'USE pc_forge;'], ['CREATE DATABASE IF NOT EXISTS pc_forge_test ', 'USE pc_forge_test;'], $sql);
 $p->exec($sql);
@@ -152,6 +166,7 @@ echo 'fixture ready';'''
         fields = customer.form('login.php')
         fields.update(email='customer@example.test', password='incorrect')
         check(customer.request('login.php', fields)[0] == 422, 'incorrect password rejected')
+        check(customer.request('login.php', dict(fields, email="customer@example.test' OR '1'='1"))[0] == 422, 'production prepared login rejects SQL injection payload')
         fields['password'] = 'test-password-123'
         old_session = [(c.name, c.value) for c in customer.cookies]
         status, _, headers = customer.request('login.php', fields)
@@ -229,6 +244,45 @@ echo 'fixture ready';'''
         fields = customer.form('orders.php')
         check(customer.request('logout.php', fields)[0] == 302, 'logout destroys session')
         check(customer.request('orders.php')[0] == 302, 'orders require login after logout')
+        fields = customer.form('login.php')
+        fields.update(email='throttle-fixture@example.test', password='incorrect')
+        for unused in range(15):
+            check(customer.request('login.php', fields)[0] == 422, 'production request within throttle budget')
+        status, body, headers = customer.request('login.php', fields)
+        check(status == 429 and int(headers['Retry-After']) > 0, 'production login throttles excessive requests')
+        fresh = Browser(base)
+        fresh_fields = fresh.form('login.php')
+        fresh_fields.update(email='throttle-fixture@example.test', password='incorrect')
+        check(fresh.request('login.php', fresh_fields)[0] == 429, 'new browser session cannot reset production account throttle')
+        # Both protected names here exist ONLY inside the disposable local fixture.
+        # Run scripts with an unrelated default schema to catch unqualified writes.
+        safety = php(query + '''
+foreach (['pc_forge','mens_daydb'] as $name) {
+ $p->exec("CREATE DATABASE `$name`");
+ $p->exec("CREATE TABLE `$name`.users (name VARCHAR(30))");
+ $p->exec("INSERT INTO `$name`.users VALUES ('untouched')");
+ $p->exec("CREATE TABLE `$name`.products (stock INT)");
+ $p->exec("INSERT INTO `$name`.products VALUES (77)");
+}
+$p->exec('USE pc_forge');
+$p->exec(file_get_contents('training-src/database/setup.sql'));
+$p->exec("UPDATE pc_forge_training.users SET role='admin' WHERE email='customer@training.test'");
+$p->exec('UPDATE pc_forge_training.products SET stock=0');
+$p->exec('USE mens_daydb');
+$p->exec(file_get_contents('training-src/database/reset.sql'));
+foreach (['pc_forge','mens_daydb'] as $name) {
+ if ($p->query("SELECT name FROM `$name`.users")->fetchColumn()!=='untouched' || (int)$p->query("SELECT stock FROM `$name`.products")->fetchColumn()!==77) { exit(1); }
+}
+echo $p->query("SELECT role FROM pc_forge_training.users WHERE email='customer@training.test'")->fetchColumn().':'.$p->query("SELECT stock FROM pc_forge_training.products WHERE name='Synthetic CPU'")->fetchColumn();
+''', env)
+        check(safety == 'customer:12', 'training setup/reset target only qualified synthetic tables, even with protected default schemas')
+        php(query + "$p->exec(str_replace('pc_forge.users',getenv('DB_NAME').'.users',file_get_contents('tests/fixtures/container-users.sql')));", env)
+        contract = subprocess.run([sys.executable, str(ROOT / 'tests/container_http.py'), base],
+                                  text=True, capture_output=True)
+        if contract.returncode:
+            raise RuntimeError('Container HTTP fixture contract failed: ' + contract.stdout + contract.stderr)
+        print(contract.stdout, end='', flush=True)
+        check(True, 'Docker HTTP helper also passes against local synthetic TLS fixture')
         # A separate PHP process exercises missing/invalid configuration safely.
         for changes, label in [({'DB_HOST': ''}, 'missing DB configuration'),
                                ({'DB_SSL_CA': ''}, 'missing SSL configuration'),

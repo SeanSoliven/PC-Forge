@@ -1,0 +1,38 @@
+#!/bin/bash
+set -Eeuo pipefail
+apache_pid=''
+training_pid=''
+cleanup() {
+    trap - EXIT TERM INT
+    [[ -z "$apache_pid" ]] || kill -TERM "$apache_pid" 2>/dev/null || true
+    [[ -z "$training_pid" ]] || kill -TERM "$training_pid" 2>/dev/null || true
+    wait || true
+}
+trap cleanup EXIT TERM INT
+if [[ "${TRAINING_PREVIEW_ENABLED:-0}" == 1 ]]; then
+    env -i PATH=/usr/local/bin:/usr/bin:/bin /usr/sbin/runuser -u pc-training -- \
+        env -i PATH=/usr/local/bin:/usr/bin:/bin /usr/local/bin/php -n /usr/local/lib/pc-forge/verify-training.php
+    env -i PATH=/usr/local/bin:/usr/bin:/bin \
+        /usr/sbin/runuser -u pc-training -- env -i PATH=/usr/local/bin:/usr/bin:/bin /usr/local/bin/php -n \
+        -d display_errors=0 -d log_errors=1 -d zend.exception_ignore_args=1 \
+        -d expose_php=0 -d allow_url_fopen=0 \
+        -d session.save_path=/run/pc-forge-training/sessions \
+        -d session.name=PCFORGE_TRAINING -d session.cookie_path=/training/ \
+        -d session.cookie_secure=1 -d session.cookie_httponly=1 -d session.cookie_samesite=Strict \
+        -d session.use_strict_mode=1 -d session.use_only_cookies=1 \
+        -d open_basedir=/opt/pc-forge-training:/run/pc-forge-training:/usr/local/lib/pc-forge/training-router.php \
+        -d disable_functions=exec,shell_exec,system,passthru,popen,proc_open,pcntl_exec \
+        -S 127.0.0.1:9081 -t /opt/pc-forge-training /usr/local/lib/pc-forge/training-router.php &
+    training_pid=$!
+    /usr/local/bin/php -r 'for($i=0;$i<50;$i++){if($s=@fsockopen("127.0.0.1",9081)){fclose($s);exit(0);}usleep(100000);}exit(1);'
+fi
+unset TRAINING_INSTRUCTOR_BCRYPT TRAINING_INSTRUCTOR_USER
+apache2ctl -t
+apache2-foreground &
+apache_pid=$!
+# Stop the whole service if either component exits, including on failure.
+set +e
+if [[ -n "$training_pid" ]]; then wait -n "$apache_pid" "$training_pid"; else wait "$apache_pid"; fi
+result=$?
+set -e
+exit "$result"

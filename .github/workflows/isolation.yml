@@ -1,0 +1,78 @@
+name: PC Forge isolation and regressions
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+# No write token, deployment environment, repository secrets, or persisted Git credentials.
+permissions:
+  contents: read
+
+concurrency:
+  group: isolation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  php-regressions:
+    name: PHP 8.3 and synthetic database regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source without saved credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install local test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y php8.3-cli php8.3-mysql mariadb-server openssl python3
+          sudo update-alternatives --set php /usr/bin/php8.3
+          php -r 'exit(PHP_MAJOR_VERSION === 8 && PHP_MINOR_VERSION === 3 ? 0 : 1);'
+          python3 --version
+      - name: PHP and shell source checks
+        run: |
+          find . -path './.git' -prune -o -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+          python3 tests/php_source.py
+          bash -n docker/start-pc-forge
+          bash -n docker/supervise-pc-forge
+          bash -n tests/container-isolation.sh
+          git diff --check
+      - name: Throttling and safe preview tests
+        run: |
+          php tests/training_checks.php
+          python3 tests/training_http.py --php php
+      - name: Authentication, authorization, cart, checkout and SQL safety regressions
+        run: python3 tests/integration.py --php php --mysqld /usr/sbin/mariadbd --openssl openssl
+      - name: Summarize job result
+        if: always()
+        run: |
+          echo '### PHP regression job: ${{ job.status }}' >> "$GITHUB_STEP_SUMMARY"
+          echo 'See individual step logs. All database accounts, certificates and records are disposable synthetic fixtures.' >> "$GITHUB_STEP_SUMMARY"
+
+  docker-isolation:
+    name: Linux Docker startup and isolation gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out source without saved credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Verify runner tools
+        run: |
+          docker version
+          curl --version
+          openssl version
+          python3 --version
+      - name: Build and exercise isolated application containers
+        run: bash tests/container-isolation.sh
+      - name: Summarize gate result
+        if: always()
+        run: |
+          echo '### Docker isolation job: ${{ job.status }}' >> "$GITHUB_STEP_SUMMARY"
+          echo 'The gate uses only generated certificates, isolated MySQL and synthetic accounts. Read its step logs for individual assertions.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Real independent training DB credentials/TLS/grants remain NOT VERIFIED. A green run does not authorize vulnerable authentication or deployment.' >> "$GITHUB_STEP_SUMMARY"

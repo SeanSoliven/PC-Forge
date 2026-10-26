@@ -19,4 +19,8 @@ install -o root -g www-data -m 640 /etc/secrets/ca.pem /run/pc-forge/ca.pem
 su -s /bin/sh www-data -c 'php -r '\''$p = getenv("DB_SSL_CA"); if (!is_file($p) || !is_readable($p) || ($pem = @file_get_contents($p)) === false || @openssl_x509_read($pem) === false) { fwrite(STDERR, "PC Forge startup error: CA certificate is unreadable or invalid for www-data.\n"); exit(1); }'\'''
 
 echo 'PC Forge: Aiven CA certificate prepared and validated for www-data.'
-exec apache2-foreground
+install -d -o www-data -g www-data -m 700 /run/pc-forge-production-sessions /run/pc-forge-login
+printf 'session.save_path="/run/pc-forge-production-sessions"\n' > /usr/local/etc/php/conf.d/zzz-sessions.ini
+export PCFORGE_RATE_DIR=/run/pc-forge-login
+php /usr/local/lib/pc-forge/prepare-training.php
+exec /usr/local/bin/supervise-pc-forge
