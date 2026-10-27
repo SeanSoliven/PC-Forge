@@ -14,7 +14,7 @@ $enabled=xss_demo_apache_config(true);$disabled=xss_demo_apache_config(false);
 foreach (['Require valid-user','AuthUserFile','RequestHeader unset Cookie',"X-Forwarded-Proto",'Header always unset Set-Cookie'] as $check) {
  if(!str_contains($enabled,$check))exit(2);
 }
-if(!str_contains($disabled,'Require all denied') || str_contains($disabled,'Alias'))exit(3);
+if(!str_contains($disabled,'Require all denied') || !str_contains($disabled,'Alias "/xss-demo/" "/opt/pc-forge-xss/"'))exit(3);
 ob_start();xss_render(['version'=>'fixed','q'=>"<script>alert('XSS Demonstration Successful')</script>"]);$fixed=ob_get_clean();
 if(str_contains($fixed,'<script>') || !str_contains($fixed,'&lt;script&gt;'))exit(4);
 ob_start();xss_render(['version'=>'vulnerable','q'=>"<script>alert('XSS Demonstration Successful')</script>"]);$vulnerable=ob_get_clean();
