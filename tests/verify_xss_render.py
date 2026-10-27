@@ -49,7 +49,8 @@ def main():
         path='/xss-demo/?version='+version
         assert request(path)[0]==401,'Unauthenticated demonstration not rejected with 401'
         status,body,headers=request(path,True)
-        assert status==200 and 'synthetic search' in body,'Authorized demo unavailable'
+        assert status==200 and 'synthetic search' in body and 'type="search"' in body and 'Predefined synthetic inputs only.' not in body,'Authorized initial demo interface unavailable'
+        assert headers.get('X-PCForge-XSS-Renderer')=='initial-load-v1','Expected renderer revision not deployed'
         assert not headers.get('Set-Cookie'),'Demo emitted cookie'
         csp=headers.get('Content-Security-Policy','')
         assert 'sandbox allow-scripts allow-modals' in csp and 'allow-same-origin' not in csp,'Opaque sandbox missing'
