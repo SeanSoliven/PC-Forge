@@ -1,4 +1,3 @@
-
 <?php
 require __DIR__ . '/bootstrap.php';
 require __DIR__ . '/layout.php';
@@ -27,13 +26,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $error = 'Too many sign-in attempts. Please try again in a few minutes.';
         } else {
-            // Direct SQL query without a prepared statement.
-            // PDO::quote() protects the email value.
+            // Unsecured direct SQL query vulnerable to SQL Injection
             $pdo = db();
 
             $sql = "SELECT id, name, email, password_hash, role
             FROM users
-            WHERE email = " . $pdo->quote($email);
+            WHERE email = '$email'";
 
             $s = $pdo->query($sql);
             $u = $s->fetch(PDO::FETCH_ASSOC);
