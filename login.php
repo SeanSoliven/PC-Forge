@@ -32,8 +32,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo = db();
 
             $sql = "SELECT id, name, email, password_hash, role
-                    FROM users
-                    WHERE email = " . $pdo->quote($email);
+            FROM users
+            WHERE email = " . $pdo->quote($email);
 
             $s = $pdo->query($sql);
             $u = $s->fetch(PDO::FETCH_ASSOC);
