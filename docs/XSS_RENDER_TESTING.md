@@ -2,6 +2,76 @@
 
 ## Scope and current status
 
+### Initial authenticated page / plain validation-message repair
+
+The checked-in renderer before this repair already returned `['vulnerable','']`
+for `['version'=>'vulnerable']`; the same holds for fixed. This was reproduced
+directly in PHP. It is therefore **not established** that missing q caused the
+reported live rejection. In that renderer, the plain `Predefined synthetic inputs
+only.` text is emitted by its validation catch with HTTP 400, before CSS/interface
+rendering. It cannot represent the same successful HTTP 200 initial response in
+the same code path. Compare the actual browser Network request, deployed commit
+and parsed-parameter rejection reason rather than assuming Basic authentication
+is responsible. No authenticated live credentials were supplied to this session.
+
+The repair makes initial navigation explicit: validate version and permitted key
+names, then return an empty search when **q is absent**. Only when q is present is
+its type/exact predefined value checked. q='' is also an approved empty search.
+Unknown keys and unapproved values remain rejected; no query value is silently
+reflected or allowed merely because a payload is absent. Both initial versions
+render PC Forge styling, the empty input, three synthetic cards and test links.
+
+Rejected requests still return 400 but now render an encoded, sandboxed recovery
+interface instead of a bare white response. Rejected values are never displayed.
+Fixed reasons are logged without parameter names/values, credentials or payloads:
+
+```text
+PC Forge XSS validation denied revision=initial-load-v1 reason=invalid-version
+PC Forge XSS validation denied revision=initial-load-v1 reason=unexpected-parameter
+PC Forge XSS validation denied revision=initial-load-v1 reason=invalid-payload-type
+PC Forge XSS validation denied revision=initial-load-v1 reason=unapproved-payload
+```
+
+Successful initial requests log `PC Forge XSS render revision=initial-load-v1
+phase=initial-load version=vulnerable` (or fixed). Responses carry the non-sensitive
+`X-PCForge-XSS-Renderer: initial-load-v1` header. This identifies the actual deployed
+renderer. Missing that header means this renderer was not reached; check deployment,
+routing and response status. A literal `&amp;` copied into a URL, array-valued fields,
+tracking parameters or a different deployed validator are examples to investigate,
+not confirmed causes of your browser request. Do not weaken the allowlist to mask it.
+
+After an approved deployment of these files, reopen these exact URLs in a new tab:
+
+```text
+https://pc-forge-k68s.onrender.com/xss-demo/?version=vulnerable
+https://pc-forge-k68s.onrender.com/xss-demo/?version=fixed
+```
+
+Authenticate with the dedicated tester identity. In Network verify HTTP 200,
+renderer header, search UI and no rejection message. Use the generated predefined
+test links for subsequent payloads. No form submissions are added: the existing
+CSP form-action none and sandbox are preserved. Run:
+
+```powershell
+python tests/xss_render_checks.py --php C:/xampp/php/php.exe
+python tests/verify_xss_render.py --verify-live --http-only
+```
+
+The offline regression now exercises both parsed version-only queries, missing and
+empty q, default fixed mode, full initial rendering, and styled 400 responses for
+bad versions, bad payload types/values and extra parameters. The live verifier now
+requires an actual search input, absence of the rejection text and the renderer
+revision header, not merely HTTP 200. Existing auth/expiry gates, both payload
+allowlists, local demos, Apache config and production pages are unchanged.
+
+Only `xss-demo-src/render.php`, `tests/xss_render_checks.py`,
+`tests/verify_xss_render.py` and this guide were changed for this repair. Nothing
+was pushed or deployed; live browser authentication and execution remain untested.
+Validation for this repair: hosted initial/error/rendering checks, startup-policy
+and diagnostics checks, eight existing XSS tests, two ownership/CSRF tests, all 35
+PHP syntax checks, Python compilation and whitespace checks PASS. No live Render
+requests were made and no claim of a deployed fix or confirmed browser cause is made.
+
 ### Persistent anonymous 403: startup diagnostics v3
 
 200 on `/` and `/login.php` proves general availability, not that the optional
