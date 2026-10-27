@@ -23,4 +23,5 @@ install -d -o www-data -g www-data -m 700 /run/pc-forge-production-sessions /run
 printf 'session.save_path="/run/pc-forge-production-sessions"\n' > /usr/local/etc/php/conf.d/zzz-sessions.ini
 export PCFORGE_RATE_DIR=/run/pc-forge-login
 php /usr/local/lib/pc-forge/prepare-training.php
+php /usr/local/lib/pc-forge/prepare-xss-demo.php
 exec /usr/local/bin/supervise-pc-forge

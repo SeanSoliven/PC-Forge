@@ -24,6 +24,13 @@ COPY docker/start-pc-forge /usr/local/bin/start-pc-forge
 COPY docker/production.ini /usr/local/etc/php/conf.d/zz-production.ini
 COPY training-src/public/ /opt/pc-forge-training/
 COPY assets/style.css /opt/pc-forge-training/assets/style.css
+COPY xss-demo-src/ /opt/pc-forge-xss/
+COPY assets/style.css /opt/pc-forge-xss/style.css
+COPY docker/prepare-xss-demo.php /usr/local/lib/pc-forge/prepare-xss-demo.php
+COPY docker/xss-demo-config.php /usr/local/lib/pc-forge/xss-demo-config.php
+RUN chown -R root:www-data /opt/pc-forge-xss \
+    && find /opt/pc-forge-xss -type d -exec chmod 750 {} + \
+    && find /opt/pc-forge-xss -type f -exec chmod 640 {} +
 COPY docker/prepare-training.php /usr/local/lib/pc-forge/prepare-training.php
 COPY docker/training-config.php /usr/local/lib/pc-forge/training-config.php
 COPY docker/training-router.php /usr/local/lib/pc-forge/training-router.php

@@ -1,7 +1,7 @@
 Options -Indexes
 RewriteEngine On
 RewriteRule (^|/)\. - [F]
-RewriteRule ^(?:training-src|docker|database|tests)(?:/|$) - [F]
+RewriteRule ^(?:xss-demo-src|training-src|docker|database|tests)(?:/|$) - [F]
 
 # Source/configuration assets must never be served by Apache.
 <FilesMatch "(?i)^(?:\..*|.*\.(?:sql|ini|pem|key|log|md)|Dockerfile|bootstrap\.php|layout\.php)$">
