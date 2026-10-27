@@ -81,7 +81,7 @@ head_html('Login');
 
     <label>
         Email
-        <input type="email" name="email" required>
+        <input type="text" name="email" required>
     </label>
 
     <label>
