@@ -97,7 +97,7 @@ function db(): PDO {
 function e($v): string {
     return htmlspecialchars(
         (string) $v,
-        ENT_QUOTES,
+        ENT_QUOTES | ENT_SUBSTITUTE,
         'UTF-8'
     );
 }
