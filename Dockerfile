@@ -29,6 +29,8 @@ COPY assets/style.css /opt/pc-forge-xss/style.css
 COPY docker/prepare-xss-demo.php /usr/local/lib/pc-forge/prepare-xss-demo.php
 COPY docker/xss-demo-config.php /usr/local/lib/pc-forge/xss-demo-config.php
 COPY docker/diagnose-xss-demo.php /usr/local/lib/pc-forge/diagnose-xss-demo.php
+COPY docker/xss-demo-diagnostics.php /usr/local/lib/pc-forge/xss-demo-diagnostics.php
+COPY docker/verify-xss-apache.php /usr/local/lib/pc-forge/verify-xss-apache.php
 RUN chown -R root:www-data /opt/pc-forge-xss \
     && find /opt/pc-forge-xss -type d -exec chmod 750 {} + \
     && find /opt/pc-forge-xss -type f -exec chmod 640 {} +

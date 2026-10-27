@@ -3,6 +3,8 @@ declare(strict_types=1);
 // Safe Render Shell diagnostic. Never print environment values, htpasswd or secrets.
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 require __DIR__.'/xss-demo-config.php';
+require __DIR__.'/xss-demo-diagnostics.php';
+foreach (xss_demo_diagnostic_lines(getenv(),time()) as $line) { echo $line.PHP_EOL; }
 [$enabled,$reason]=xss_demo_configuration_status(getenv(),time());
 echo 'Current settings: '.($enabled?'enabled':'disabled').' reason='.$reason.PHP_EOL;
 $config='/etc/apache2/conf-enabled/pc-forge-xss.conf';

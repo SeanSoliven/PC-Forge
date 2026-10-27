@@ -54,11 +54,16 @@ with tempfile.TemporaryDirectory(prefix='pcforge-apache-xss-') as directory:
         with result: return result.code,result.read().decode(),result.headers
     for stage,config in [('old-disabled',old),('enabled',generated(True)),('new-disabled',generated(False))]:
         config=config.replace('/opt/pc-forge-xss',demo.as_posix()).replace('/run/pc-forge-xss-auth/testers',auth.as_posix())
-        file=work/'httpd.conf';file.write_text(header+config+'\n</VirtualHost>\n')
+        fragment=work/'pc-forge-xss.conf';fragment.write_text(config)
+        file=work/'httpd.conf';file.write_text(header+'Include "'+fragment.as_posix()+'"\n</VirtualHost>\n')
         command=[args.httpd,'-f',str(file)]
         validation=subprocess.run(command+['-t'],capture_output=True,text=True)
         if validation.returncode: raise RuntimeError('Apache fixture syntax/startup: '+validation.stderr)
         check(True,stage+' Apache Syntax OK')
+        included=subprocess.run(command+['-t','-D','DUMP_INCLUDES'],capture_output=True,text=True)
+        raw=(included.stdout+'\n'+included.stderr).replace('\\','/').replace(fragment.as_posix(),'/etc/apache2/conf-enabled/pc-forge-xss.conf')
+        parsed=subprocess.check_output([args.php,'-r',"require 'docker/xss-demo-diagnostics.php';echo xss_demo_include_status(stream_get_contents(STDIN),"+str(included.returncode)+");"],input=raw,cwd=ROOT,text=True)
+        check(parsed=='loaded',stage+' real Apache include tree confirms generated fragment')
         with (work/'process.log').open('w') as log:
             proc=subprocess.Popen(command,stdout=log,stderr=log,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
             try:
@@ -76,6 +81,7 @@ with tempfile.TemporaryDirectory(prefix='pcforge-apache-xss-') as directory:
                         status,body,_=request('/xss-demo/?version='+version,token)
                         check(status==200 and body=='synthetic-authorized-adapter','authorized '+version+' reaches Alias target')
                     check(request('/xss-demo/',token,https=False)[0]==403,'correct credentials still require forwarded HTTPS')
+                    check(request('/xss-demo/',https=False)[0]==403,'missing forwarded HTTPS produces 403 even anonymously')
                     check(request('/xss-demo',token)[0]==403,'slashless route cannot bypass route policy')
                 else:
                     check(request('/xss-demo/?version=vulnerable',token)[0]==403,stage+' stays denied even with credentials')

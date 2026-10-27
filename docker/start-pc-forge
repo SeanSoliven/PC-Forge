@@ -24,4 +24,5 @@ printf 'session.save_path="/run/pc-forge-production-sessions"\n' > /usr/local/et
 export PCFORGE_RATE_DIR=/run/pc-forge-login
 php /usr/local/lib/pc-forge/prepare-training.php
 php /usr/local/lib/pc-forge/prepare-xss-demo.php
+php /usr/local/lib/pc-forge/verify-xss-apache.php
 exec /usr/local/bin/supervise-pc-forge

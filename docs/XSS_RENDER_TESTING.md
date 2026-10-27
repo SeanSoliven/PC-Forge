@@ -2,6 +2,127 @@
 
 ## Scope and current status
 
+### Persistent anonymous 403: startup diagnostics v3
+
+200 on `/` and `/login.php` proves general availability, not that the optional
+demo passed its startup gate. 401 is expected only when the enabled authenticated
+policy is loaded **and** Apache sees X-Forwarded-Proto exactly equal to https.
+The current source deliberately returns 403 in these cases:
+
+| Diagnostic reason / layer | Meaning and corrective action |
+| --- | --- |
+| not-enabled | XSS_DEMO_ENABLED absent or not exactly 1; correct that existing-service setting |
+| invalid-tester-name | Missing/invalid dedicated username; use the documented allowed characters |
+| invalid-bcrypt | Missing/malformed hash, wrong cost or accidental username prefix/quotes; use only the literal bcrypt hash, cost 8–14 |
+| invalid-expiry | Missing/non-digit value; use Unix seconds, not a date string |
+| expired | Window already ended; generate a fresh approved short window |
+| expiry-over-eight-hours | Future timestamp exceeds eight hours; milliseconds also commonly trigger this |
+| runtime-file-preparation-failed stage=auth-directory/auth-file/apache-policy | Startup could not prepare the named runtime stage; use safe file/worker-read diagnostics, not broad permission grants |
+| Apache config=NOT-LOADED | Apache include tree did not load the generated file; inspect IncludeOptional/vhost/startup overrides; startup now stops |
+| Apache config=syntax-or-includes-failed | Apache parse/include command failed; startup now stops; run apache2ctl -t in the service shell for exact syntax details |
+| Loaded tester-authentication, internal HTTPS request=401 but external=403 | Check the actual Render proxy/deploy path and competing vhost/Location policies; do not remove the HTTPS requirement |
+| Request denied layer=php reason=expired, etc. | Request reached PHP after Apache authorization, then failed the independent runtime gate |
+
+No single reason is confirmed for your deployed service without its diagnostic
+output. A static expiry from an earlier exercise legitimately expires even while
+the storefront keeps returning 200. Do not change the denial to Require all granted.
+
+#### Inspect Render Logs and prove the deployed revision
+
+1. Review/commit the diagnostic changes and obtain push/deploy approval. Nothing
+   here pushes automatically. A local edited/untracked file is not part of any
+   deployed commit. Record `git status --short` and `git rev-parse HEAD` after the
+   intended changes are committed; confirm the remote commit contains the files.
+2. In Render Dashboard select the existing PC Forge service. Open its deployment
+   event/details and compare its commit SHA with that expected commit. Confirm
+   the connected repository/branch and default Docker Command/startup settings.
+   An override that launches apache2-foreground directly bypasses preparation and
+   the diagnostic gate. Keep the Dockerfile CMD start-pc-forge.
+3. Deploy/rebuild the reviewed commit only after approval. Redeploying an old image
+   or using Save and deploy for settings alone does not add new source files.
+   Save only leaves old runtime settings in effect until a deployment occurs.
+4. Open service **Logs**, select the new deploy's startup time window/instance,
+   and search for `PC Forge XSS`. The expected sequence is:
+
+   ```text
+   PC Forge XSS diagnostics revision=xss-startup-v3 commit=<40-character SHA>
+   PC Forge XSS settings enabled=yes reason=enabled
+   PC Forge XSS flags enable_exact_1=yes tester_name=valid bcrypt=valid expiry=valid
+   PC Forge: XSS demo route authenticated reason=enabled target=/opt/pc-forge-xss
+   PC Forge XSS Apache config=loaded
+   PC Forge XSS loaded policy=tester-authentication alias=present
+   ```
+
+   Missing revision=xss-startup-v3 means the new startup code did not execute:
+   distinguish old deployment, wrong instance/log window or startup override.
+   commit=unavailable means that variable was unavailable/invalid, not permission
+   to assume the local commit is deployed. Compare the Render deployment event.
+   Check every running instance if the service has multiple instances.
+5. In Render **Shell** on that deployment:
+
+   ```sh
+   php /usr/local/lib/pc-forge/diagnose-xss-demo.php
+   php /usr/local/lib/pc-forge/verify-xss-apache.php
+   apache2ctl -t
+   apache2ctl -t -D DUMP_INCLUDES
+   apache2ctl -S
+   ```
+
+   `verify-xss-apache.php` checks Apache's parsed include tree, not just whether
+   a file exists. It logs only status and policy type, never raw command output
+   or credentials. It runs automatically after policy generation and before the
+   supervisor; missing/invalid/unrecognized policy prevents unchecked startup.
+   The second startup parse does not change auth/expiry/sandbox rules. A shell
+   check describes current files; pair it with the startup log of the running
+   process to detect manual changes after startup.
+6. If settings and include checks pass but anonymous external requests are still
+   403, compare these **credential-free** internal requests from Render Shell:
+
+   ```sh
+   curl -s -o /dev/null -w 'forwarded-https: %{http_code}\n' -H 'Host: pc-forge-k68s.onrender.com' -H 'X-Forwarded-Proto: https' http://127.0.0.1/xss-demo/
+   curl -s -o /dev/null -w 'without-forwarded-https: %{http_code}\n' -H 'Host: pc-forge-k68s.onrender.com' http://127.0.0.1/xss-demo/
+   ```
+
+   Enabled authenticated policy expects first=401, second=403. Both=403 points
+   back to disabled/overriding authorization or a different active vhost; check
+   the include/vhost dump. First=401 and external=403 narrows investigation to
+   external routing/forwarding or a different instance; never weaken the check.
+   Do not include Basic credentials in these diagnostic requests.
+7. Correct only the named setting/runtime problem, obtain approval for any
+   settings-triggered deployment, then repeat the existing HTTP verifier. Its
+   expected progression is public 200, anonymous demo 401, authorized demo 200.
+   Live browser/sandbox acceptance remains a separate required check.
+
+Render documents [RENDER_GIT_COMMIT as the deployment SHA](https://render.com/docs/environment-variables),
+and the different [environment save/deploy options](https://render.com/docs/configure-environment-variables).
+Diagnostics log only that validated non-secret SHA, fixed reason codes and validity
+flags. They never log tester names, passwords, bcrypt hashes, expiry values,
+Authorization/Cookie headers, payloads, request bodies or database variables.
+
+Added diagnostics helper and loaded-config verifier are packaged by Dockerfile.
+The request PHP guard now logs only a fixed reason if it independently denies
+access. Existing auth, expiry conditions and CSP/browser sandbox are unchanged.
+
+Offline validation commands:
+
+```powershell
+python tests/test_xss_diagnostics.py --php C:/xampp/php/php.exe
+python tests/test_xss_startup_policy.py --php C:/xampp/php/php.exe
+python tests/xss_render_checks.py --php C:/xampp/php/php.exe
+python tests/test_xss_apache_routing.py --php C:/xampp/php/php.exe
+```
+
+The real Apache regression additionally checks DUMP_INCLUDES output using the
+actual parser and a temporary included fragment. No Render configuration or
+credentials are needed; it does not prove which policy is deployed remotely.
+
+Executed validation for diagnostics v3: secret-redaction/include-parser tests,
+startup-policy tests, hosted-rendering checks, eight XSS tests, two ownership/CSRF
+tests, PHP source checks and syntax checks on all 35 PHP files PASS. The real
+XAMPP Apache fixture passes its old/enabled/disabled policy cases, generated
+include-tree recognition, and anonymous missing-forwarded-HTTPS=403 versus
+forwarded-HTTPS=401. Actual Render startup and browser execution remain untested.
+
 ### Apache 403 repair and precise diagnosis
 
 Reported Render log: `AH01630: client denied by server configuration:
