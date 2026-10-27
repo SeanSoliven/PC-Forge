@@ -16,7 +16,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new InvalidArgumentException('Invalid email or password.');
         }
 
-        $retry = login_budget($email);
+        $retry = login_attempt($email, 'check');
 
         if ($retry) {
             error_log('PC Forge login rate limit rejected a request.');
@@ -24,38 +24,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             http_response_code(429);
             header('Retry-After: ' . $retry);
 
-            $error = 'Too many sign-in attempts. Please try again in a few minutes.';
+            $error = 'Too many failed login attempts. Please try again in 2 minutes.';
         } else {
-            // Unsecured direct SQL query vulnerable to SQL Injection
-            $pdo = db();
-
-            $sql = "SELECT id, name, email, password_hash, role
-            FROM users
-            WHERE email = '$email'";
-
-            $s = $pdo->query($sql);
+            $s = db()->prepare(
+                'SELECT id, name, email, password_hash, role FROM users WHERE email = ?'
+            );
+            $s->execute([$email]);
             $u = $s->fetch(PDO::FETCH_ASSOC);
 
             if (
                 !$u ||
+                !password_verify($password, $u['password_hash']) ||
                 !in_array($u['role'], ['customer', 'admin'], true)
             ) {
-                throw new InvalidArgumentException('Invalid email or password.');
-            }
-
-            if (!session_regenerate_id(true)) {
+                $retry = login_attempt($email, 'failed');
+                if ($retry) {
+                    http_response_code(429);
+                    header('Retry-After: ' . $retry);
+                    $error = 'Too many failed login attempts. Please try again in 2 minutes.';
+                } else {
+                    http_response_code(422);
+                    $error = 'Invalid email or password.';
+                }
+            } elseif (!session_regenerate_id(true)) {
                 throw new RuntimeException('Session regeneration failed');
+            } else {
+                login_attempt($email, 'success');
+
+                unset($u['password_hash'], $_SESSION['csrf']);
+
+                $_SESSION['user'] = $u;
+
+                redirect(
+                    $u['role'] === 'admin'
+                    ? 'admin/index.php'
+                    : 'index.php'
+                );
             }
-
-            unset($u['password_hash'], $_SESSION['csrf']);
-
-            $_SESSION['user'] = $u;
-
-            redirect(
-                $u['role'] === 'admin'
-                ? 'admin/index.php'
-                : 'index.php'
-            );
         }
     } catch (Throwable $e) {
         $error = request_error($e, 'login failed');

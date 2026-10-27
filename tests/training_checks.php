@@ -9,18 +9,22 @@ function verify_check(bool $ok,string $name): void {
 $directory=sys_get_temp_dir().'/pc-forge-limit-test-'.bin2hex(random_bytes(8));
 mkdir($directory,0700); putenv('PCFORGE_RATE_DIR='.$directory);
 try {
-    for ($i=0;$i<15;$i++) { verify_check(login_budget('synthetic@example.test')===0,'under account budget'); }
-    verify_check(login_budget('synthetic@example.test')>0,'account limit is independent of proxy IP/session');
+    for ($i=0;$i<4;$i++) { verify_check(login_attempt('synthetic@example.test','failed')===0,'first four failures are allowed'); }
+    verify_check(login_attempt('synthetic@example.test','failed')===120,'fifth failure starts two-minute cooldown');
+    verify_check(login_attempt('synthetic@example.test','check')>0,'cooldown blocks further attempts');
     $states=json_decode(file_get_contents($directory.'/budgets.json'),true);
-    foreach ($states as &$state) { $state['start']=time()-301; } unset($state);
+    $key=hash('sha256','account:synthetic@example.test');
+    $states[$key]['locked_until']=time()-1;
     file_put_contents($directory.'/budgets.json',json_encode($states));
-    verify_check(login_budget('synthetic@example.test')===0,'budget expiration');
-    $allowed=true;
-    for ($i=0;$i<650;$i++) { $allowed=$allowed && login_budget('shared-proxy-'.$i.'@example.test')===0; }
-    verify_check($allowed,'650 unrelated accounts never share a proxy-IP budget');
+    verify_check(login_attempt('synthetic@example.test','check')===0,'cooldown expires after two minutes');
+    login_attempt('synthetic@example.test','failed');
+    login_attempt('synthetic@example.test','success');
+    for ($i=0;$i<4;$i++) { verify_check(login_attempt('synthetic@example.test','failed')===0,'successful login resets failed count'); }
+    verify_check(login_attempt('synthetic@example.test','failed')===120,'account limit is independent of other accounts');
+    verify_check(login_attempt('other@example.test','check')===0,'unrelated account is not locked');
     file_put_contents($directory.'/budgets.json','invalid json');
     $failed=false;
-    try { login_budget('x'); } catch (Throwable $error) { $failed=true; }
+    try { login_attempt('x','check'); } catch (Throwable $error) { $failed=true; }
     verify_check($failed,'corrupt storage fails closed');
 } finally {
     unlink($directory.'/budgets.json'); rmdir($directory); putenv('PCFORGE_RATE_DIR');
