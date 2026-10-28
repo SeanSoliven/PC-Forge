@@ -34,6 +34,10 @@ Register a normal account first. Then in DBeaver, run `UPDATE users SET role='ad
 ## Notes
 This is a starter demo, not a production-ready store. Checkout supports COD and a **manual bank transfer placeholder**, with no gateway, shipping carrier, email confirmations, or payment verification integration. Session-based cart is used; `cart_items` is reserved for future persistent carts. Product images are illustrative remote URLs. Test and harden before accepting real orders: HTTPS, trusted image hosting, rate limits, server-side validation, persistent cart, secure session cookies, CSRF, auditing, and shipping/payment workflows. The checkout transaction locks product rows and decrements inventory atomically.
 
+### Session cart growth limit
+
+Cart mutations enforce server-side caps of 20 different products, 20 units per product, and 50 units total. Checkout checks the same limits before creating an order. These bounds limit session data and per-checkout database work if a client repeatedly adds items; update them in `config/cart_limits.php` if the store's intended basket size changes. They protect this specific cart-growth scenario, not general request-flood or volumetric DoS traffic.
+
 
 ## Audit and verification
 See `AUDIT.md` for the repair findings, exact local checks, deployment verification, and limitations.
