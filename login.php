@@ -45,12 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif (!session_regenerate_id(true)) {
                 throw new RuntimeException('Session regeneration failed');
             } else {
-                $loginStatus = login_attempt($email, 'success');
-                if ($loginStatus['locked_until'] > time()) {
-                    $_SESSION['login_attempt_email'] = $email;
-                    header('Retry-After: ' . ($loginStatus['locked_until'] - time()));
-                    redirect('login.php');
-                }
+                login_attempt($email, 'success');
 
                 unset($u['password_hash'], $_SESSION['csrf'], $_SESSION['login_attempt_email']);
 
@@ -108,7 +103,7 @@ head_html('Login');
 
     <label>
         Email
-        <input type="text" name="email" value="<?= e($_SESSION['login_attempt_email'] ?? '') ?>" required>
+        <input type="text" name="email" required>
     </label>
 
     <label>
