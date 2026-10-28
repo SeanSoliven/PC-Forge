@@ -1,33 +1,9 @@
 <?php
 declare(strict_types=1);
-require __DIR__.'/../config/login_limit.php';
 require __DIR__.'/../docker/training-config.php';
 function verify_check(bool $ok,string $name): void {
     if (!$ok) { fwrite(STDERR,"FAIL: $name\n"); exit(1); }
     echo "PASS: $name\n";
-}
-$directory=sys_get_temp_dir().'/pc-forge-limit-test-'.bin2hex(random_bytes(8));
-mkdir($directory,0700); putenv('PCFORGE_RATE_DIR='.$directory);
-try {
-    for ($i=0;$i<4;$i++) { verify_check(login_attempt('synthetic@example.test','failed')===0,'first four failures are allowed'); }
-    verify_check(login_attempt('synthetic@example.test','failed')===120,'fifth failure starts two-minute cooldown');
-    verify_check(login_attempt('synthetic@example.test','check')>0,'cooldown blocks further attempts');
-    $states=json_decode(file_get_contents($directory.'/budgets.json'),true);
-    $key=hash('sha256','account:synthetic@example.test');
-    $states[$key]['locked_until']=time()-1;
-    file_put_contents($directory.'/budgets.json',json_encode($states));
-    verify_check(login_attempt('synthetic@example.test','check')===0,'cooldown expires after two minutes');
-    login_attempt('synthetic@example.test','failed');
-    login_attempt('synthetic@example.test','success');
-    for ($i=0;$i<4;$i++) { verify_check(login_attempt('synthetic@example.test','failed')===0,'successful login resets failed count'); }
-    verify_check(login_attempt('synthetic@example.test','failed')===120,'account limit is independent of other accounts');
-    verify_check(login_attempt('other@example.test','check')===0,'unrelated account is not locked');
-    file_put_contents($directory.'/budgets.json','invalid json');
-    $failed=false;
-    try { login_attempt('x','check'); } catch (Throwable $error) { $failed=true; }
-    verify_check($failed,'corrupt storage fails closed');
-} finally {
-    unlink($directory.'/budgets.json'); rmdir($directory); putenv('PCFORGE_RATE_DIR');
 }
 $config=training_apache_config(str_repeat('a',64));
 foreach (['Require valid-user','RequestHeader unset Cookie','RequestHeader unset Authorization',

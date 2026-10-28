@@ -1,61 +1,85 @@
 <?php
-// Failed-login counts and cooldowns persist across requests on this app instance.
-function login_attempt(string $email, string $action): int {
+function login_attempt(string $email, string $action): array {
     if (!in_array($action, ['check', 'failed', 'success'], true)) {
         throw new InvalidArgumentException('Invalid login attempt action.');
     }
 
-    $directory = getenv('PCFORGE_RATE_DIR') ?: sys_get_temp_dir().'/pc-forge-login';
-    if (!is_dir($directory) && !@mkdir($directory, 0700, true) && !is_dir($directory)) {
-        throw new RuntimeException('Login attempt storage unavailable');
+    $pdo = db();
+    $key = hash('sha256', 'account:' . $email);
+    $now = time();
+
+    if ($action === 'check') {
+        $statement = $pdo->prepare(
+            'SELECT failed_attempts, locked_until FROM login_attempts WHERE account_key = ?'
+        );
+        $statement->execute([$key]);
+        $state = $statement->fetch(PDO::FETCH_ASSOC);
+
+        if (!$state) {
+            return ['failures' => 0, 'locked_until' => 0];
+        }
+
+        $failures = (int) $state['failed_attempts'];
+        $lockedUntil = (int) $state['locked_until'];
+        if ($lockedUntil > 0 && $lockedUntil <= $now) {
+            $reset = $pdo->prepare(
+                'UPDATE login_attempts SET failed_attempts = 0, locked_until = 0
+                 WHERE account_key = ? AND locked_until = ?'
+            );
+            $reset->execute([$key, $lockedUntil]);
+
+            return ['failures' => 0, 'locked_until' => 0];
+        }
+
+        return ['failures' => $failures, 'locked_until' => $lockedUntil];
     }
-    $handle = @fopen($directory.'/budgets.json', 'c+');
-    if (!$handle) { throw new RuntimeException('Login attempt storage unavailable'); }
 
+    $pdo->beginTransaction();
     try {
-        if (!flock($handle, LOCK_EX)) { throw new RuntimeException('Login attempt lock unavailable'); }
-        $raw = stream_get_contents($handle);
-        $states = $raw === '' ? [] : json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
-        if (!is_array($states)) { throw new RuntimeException('Invalid login attempt storage'); }
+        $insert = $pdo->prepare(
+            'INSERT IGNORE INTO login_attempts (account_key) VALUES (?)'
+        );
+        $insert->execute([$key]);
 
-        $key = hash('sha256', 'account:'.$email);
-        $now = time();
-        foreach ($states as $stateKey => $state) {
-            if (!is_array($state) || !isset($state['failures'], $state['locked_until'])) {
-                unset($states[$stateKey]);
-            } elseif ((int)$state['locked_until'] > 0 && (int)$state['locked_until'] <= $now) {
-                unset($states[$stateKey]);
+        $select = $pdo->prepare(
+            'SELECT failed_attempts, locked_until FROM login_attempts
+             WHERE account_key = ? FOR UPDATE'
+        );
+        $select->execute([$key]);
+        $state = $select->fetch(PDO::FETCH_ASSOC);
+        if (!$state) {
+            throw new RuntimeException('Login attempt storage unavailable');
+        }
+
+        $failures = (int) $state['failed_attempts'];
+        $lockedUntil = (int) $state['locked_until'];
+
+        if ($action === 'success' && $lockedUntil > $now) {
+            // A concurrent fifth failure must not be bypassed by an in-flight login.
+        } elseif ($action === 'success') {
+            $failures = 0;
+            $lockedUntil = 0;
+        } elseif ($lockedUntil > $now) {
+            // A concurrent request may have started the cooldown after its initial check.
+        } else {
+            if ($lockedUntil > 0 || $failures >= 5) {
+                $failures = 0;
             }
+            $failures++;
+            $lockedUntil = $failures >= 5 ? $now + 120 : 0;
         }
 
-        $retry = 0;
-        if ($action === 'success') {
-            unset($states[$key]);
-        } elseif (isset($states[$key]) && (int)$states[$key]['locked_until'] > $now) {
-            $retry = (int)$states[$key]['locked_until'] - $now;
-        } elseif (count($states) >= 10000 && !isset($states[$key])) {
-            // Keep storage bounded and fail closed if it cannot track another account.
-            $retry = 120;
-        } elseif ($action === 'failed') {
-            $states[$key] = [
-                'failures' => (int)($states[$key]['failures'] ?? 0) + 1,
-                'locked_until' => 0
-            ];
-            if ($states[$key]['failures'] >= 5) {
-                // Five consecutive failures lock the account for two minutes.
-                $states[$key]['locked_until'] = $now + 120;
-                $retry = 120;
-            }
-        }
+        $update = $pdo->prepare(
+            'UPDATE login_attempts SET failed_attempts = ?, locked_until = ? WHERE account_key = ?'
+        );
+        $update->execute([$failures, $lockedUntil, $key]);
+        $pdo->commit();
 
-        $json = json_encode($states, JSON_THROW_ON_ERROR);
-        rewind($handle);
-        if (!ftruncate($handle, 0) || fwrite($handle, $json) !== strlen($json) || !fflush($handle)) {
-            throw new RuntimeException('Login attempt storage write unavailable');
+        return ['failures' => $failures, 'locked_until' => $lockedUntil];
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
         }
-        return $retry;
-    } finally {
-        flock($handle, LOCK_UN);
-        fclose($handle);
+        throw $error;
     }
 }

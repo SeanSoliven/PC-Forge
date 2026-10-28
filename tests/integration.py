@@ -97,8 +97,7 @@ try:
         dbport, webport = port(), port()
         env = os.environ.copy()
         env.update(DB_HOST='127.0.0.1', DB_PORT=str(dbport), DB_NAME='pc_forge_test',
-                   DB_USER='root', DB_PASSWORD='', DB_SSL_CA=str(cert), RENDER='false',
-                   PCFORGE_RATE_DIR=str(work / 'login-budgets'))
+                   DB_USER='root', DB_PASSWORD='', DB_SSL_CA=str(cert), RENDER='false')
         check(php("require 'config/db.php';if(headers_sent()){exit(1);}echo 'quiet';", env) == 'quiet', 'db include emits no output with buffering disabled')
         probe = "session_save_path(" + repr(str(sessions).replace('\\', '/')) + ");require 'bootstrap.php';echo session_status()===PHP_SESSION_ACTIVE && !headers_sent()?'active':'failed';"
         check(php(probe, env) == 'active', 'session starts before output with PHP buffering disabled')
@@ -165,13 +164,15 @@ echo 'fixture ready';'''
         check(status == 422 and 'already exists' in body, 'duplicate-email registration')
         fields = customer.form('login.php')
         fields.update(email='customer@example.test', password='incorrect')
-        check(customer.request('login.php', fields)[0] == 422, 'incorrect password rejected')
-        check(customer.request('login.php', dict(fields, email="customer@example.test' OR '1'='1"))[0] == 422, 'production prepared login rejects SQL injection payload')
+        check(customer.request('login.php', fields)[0] == 302, 'incorrect password rejected and redirected to status')
+        check('4 attempts remaining.' in customer.request('login.php')[1], 'first failure shows remaining attempts')
+        check(customer.request('login.php', dict(fields, email="customer@example.test' OR '1'='1"))[0] == 302, 'production prepared login rejects SQL injection payload')
         fields['password'] = 'test-password-123'
         old_session = [(c.name, c.value) for c in customer.cookies]
         status, _, headers = customer.request('login.php', fields)
         check(status == 302 and headers['Location'] == 'index.php', 'customer login redirect')
         check(old_session != [(c.name, c.value) for c in customer.cookies], 'session regenerated after login')
+        check(php(query + "$key=hash('sha256','account:customer@example.test');$s=$p->prepare('SELECT failed_attempts FROM login_attempts WHERE account_key=?');$s->execute([$key]);echo $s->fetchColumn();", env) == '0', 'successful login resets failed attempt count')
         check(customer.request('admin/index.php')[0] == 403, 'customer forbidden from admin; registration ignored submitted admin role')
         check(customer.request('admin/index.php', {'action': 'stock', 'id': 1, 'stock': 999})[0] == 403, 'customer admin POST forbidden')
         fields = customer.form('index.php')
@@ -246,14 +247,24 @@ echo 'fixture ready';'''
         check(customer.request('orders.php')[0] == 302, 'orders require login after logout')
         fields = customer.form('login.php')
         fields.update(email='throttle-fixture@example.test', password='incorrect')
-        for unused in range(15):
-            check(customer.request('login.php', fields)[0] == 422, 'production request within throttle budget')
-        status, body, headers = customer.request('login.php', fields)
-        check(status == 429 and int(headers['Retry-After']) > 0, 'production login throttles excessive requests')
+        for remaining in (4, 3, 2, 1):
+            check(customer.request('login.php', fields)[0] == 302, 'failed login redirects to attempt status')
+            check(f'{remaining} attempt' in customer.request('login.php')[1], 'remaining-attempt message updates')
+        check(customer.request('login.php', fields)[0] == 302, 'fifth failed login starts cooldown')
+        status, body, _ = customer.request('login.php')
+        check(status == 200 and 'Too many failed login attempts.' in body, 'cooldown message is displayed')
+        expiration = re.search(r'data-lockout-until="(\d+)"', body).group(1)
+        check('id="login-button" disabled' in body and 'assets/login.js' in body, 'login is disabled and countdown script is loaded')
+        check(re.search(r'try again in \d{2}:\d{2}\.', body) is not None, 'cooldown is displayed as MM:SS')
+        check(re.search(r'data-lockout-until="(\d+)"', customer.request('login.php')[1]).group(1) == expiration, 'refresh keeps server lockout expiration')
         fresh = Browser(base)
         fresh_fields = fresh.form('login.php')
         fresh_fields.update(email='throttle-fixture@example.test', password='incorrect')
-        check(fresh.request('login.php', fresh_fields)[0] == 429, 'new browser session cannot reset production account throttle')
+        check(fresh.request('login.php', fresh_fields)[0] == 302, 'new browser session cannot reset production account throttle')
+        fresh_body = fresh.request('login.php')[1]
+        check(re.search(r'data-lockout-until="(\d+)"', fresh_body).group(1) == expiration, 'server enforces same account expiry across browser sessions')
+        php(query + "$p->exec(\"UPDATE login_attempts SET locked_until=UNIX_TIMESTAMP()-1 WHERE account_key='\".hash('sha256','account:throttle-fixture@example.test').\"'\");", env)
+        check('Too many failed login attempts.' not in customer.request('login.php')[1], 'expired cooldown clears on server status check')
         # Both protected names here exist ONLY inside the disposable local fixture.
         # Run scripts with an unrelated default schema to catch unqualified writes.
         safety = php(query + '''

@@ -3,7 +3,7 @@
 ## 1. Aiven
 Create a **MySQL** service in Aiven. From its overview, copy host, port, username, password and CA certificate. Aiven commonly provides `defaultdb` already; easiest is to import `database/schema.sql` with an account allowed to create databases. If your account cannot create databases, remove the first two SQL lines and import into an existing database; set DB_NAME accordingly.
 
-In DBeaver: connect to Aiven MySQL with SSL enabled and CA certificate configured; open SQL Editor, paste schema.sql, execute script.
+In DBeaver: connect to Aiven MySQL with SSL enabled and CA certificate configured; open SQL Editor, paste schema.sql, execute script. For an existing database, select the database configured by `DB_NAME` and run `database/login_attempts_migration.sql` once instead of reimporting the full schema.
 
 ## 2. Run locally (XAMPP)
 Copy folder to `C:\xampp\htdocs\pc-forge`. PHP needs pdo_mysql enabled. Supply environment variables DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD, DB_SSL_CA to Apache/PHP (or configure your local Apache environment). Do not commit secrets. DB_SSL_CA should point to the Aiven CA PEM file on the server. Open http://localhost/pc-forge/.
@@ -26,7 +26,7 @@ Missing, empty, unreadable, or invalid certificates stop startup. PHP also valid
 before connecting and keeps SSL server certificate verification enabled.
 The CA stays outside Apache's document root. Production PHP hides errors from visitors
 and logs errors to container stderr, visible in private Render service logs.
-This deployment process does not import a schema or change any database records.
+This deployment process does not import a schema or change any database records. Select the database configured by `DB_NAME` and apply `database/login_attempts_migration.sql` once before deploying the login-attempt change.
 
 ## 4. Admin account
 Register a normal account first. Then in DBeaver, run `UPDATE users SET role='admin' WHERE email='YOUR_REGISTERED_EMAIL';` (replace with your own email). Log out and log in again. Never expose an admin registration option publicly.
